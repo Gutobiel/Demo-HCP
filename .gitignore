@@ -1,0 +1,8 @@
+.env
+email_ti_hcpneus.txt
+venv/*
+__pycache__/*
+*.pyc
+*.pyo
+*.pyd
+*.pyw
