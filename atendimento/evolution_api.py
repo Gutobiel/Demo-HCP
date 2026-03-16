@@ -10,10 +10,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Configurações obtidas do ambiente ou defaults
 EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "http://localhost:8080")
-EVOLUTION_API_KEY = os.getenv("AUTHENTICATION_API_KEY", "")
+EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY")
 EVOLUTION_INSTANCE_NAME = os.getenv("EVOLUTION_INSTANCE_NAME", "hcpneus-bot")
-
 
 def _headers():
     """Retorna os headers padrão para as requisições."""
