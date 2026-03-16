@@ -240,3 +240,44 @@ def buscar_conhecimento(pergunta: str, max_resultados: int = 3) -> str:
         output += f"Fonte: {art.get('url', '')}\n\n"
 
     return output
+
+
+def popula_lancedb():
+    """
+    Popula o banco de dados vetorial LanceDB com os artigos da KNOWLEDGE_BASE.
+    Isso deve ser executado uma vez para inicializar o RAG do Agno.
+    """
+    from agno.knowledge import Knowledge
+    from agno.vectordb.lancedb import LanceDb
+    from agno.knowledge.embedder.openai import OpenAIEmbedder
+    from agno.knowledge.document import Document
+
+    print("Iniciando população do LanceDB...")
+    
+    # Criar listas para insert_many
+    text_contents = []
+    for art in KNOWLEDGE_BASE:
+        content = f"Título: {art['titulo']}\nConteúdo: {art['conteudo']}\nURL: {art['url']}"
+        text_contents.append(content)
+    
+    # Configurar base de conhecimento
+    kb = Knowledge(
+        vector_db=LanceDb(
+            table_name="conhecimento_pneus",
+            uri="lancedb_storage",
+            embedder=OpenAIEmbedder(id="text-embedding-3-small")
+        )
+    )
+    
+    # Carregar documentos usando insert_many
+    kb.insert_many(text_contents=text_contents, upsert=True)
+    print("LanceDB populado com sucesso!")
+
+if __name__ == "__main__":
+    # Script para rodar manualmente e popular o banco
+    import os
+    # Certifique-se de que a API KEY está no ambiente
+    if "OPENAI_API_KEY" not in os.environ:
+        print("ERRO: OPENAI_API_KEY não encontrada no ambiente.")
+    else:
+        popula_lancedb()

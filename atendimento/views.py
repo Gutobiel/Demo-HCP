@@ -5,13 +5,18 @@ import json
 import logging
 import re
 
-from .agent import process_message
+from .hc_agent import HCPneusAI
 from . import evolution_api
+from .knowledge_base import popula_lancedb
 
 logger = logging.getLogger(__name__)
 
-# Memória temporária para estado das conversas (Dicionário por número de telefone ou session id)
-whatsapp_sessions = {}
+# Garantir que a base de conhecimento vetorial está pronta (LanceDB)
+# Em produção, isso deveria rodar uma vez no setup do projeto
+try:
+    popula_lancedb()
+except Exception as e:
+    logger.warning(f"Aviso ao popular LanceDB: {e}")
 
 def chat_view(request):
     """Render the main chat interface."""
@@ -26,13 +31,12 @@ def chat_api(request):
             user_message = data.get("message")
             session_id = data.get("session_id", "web-default")
             
-            # Recuperar estado da sessão (ou criar novo)
-            session_state = whatsapp_sessions.get(session_id, {})
+            # Criar agente com a sessão persistente
+            agent = HCPneusAI.build_agent(session_id=session_id)
             
-            response_text, new_state = process_message(user_message, session_state)
-            
-            # Salvar estado atualizado
-            whatsapp_sessions[session_id] = new_state
+            # Processar mensagem (Agno retorna um run_response)
+            run_response = agent.run(user_message)
+            response_text = run_response.content
             
             return JsonResponse({"response": response_text})
         except Exception as e:
@@ -68,14 +72,14 @@ def whatsapp_webhook(request):
 
                 logger.info(f"Mensagem recebida de {phone_number}: {user_text}")
 
-                # Recuperar ou iniciar estado do agente para este número
-                current_state = whatsapp_sessions.get(phone_number, {})
+                logger.info(f"Mensagem recebida de {phone_number}: {user_text}")
+
+                # Criar agente com a sessão persistente (número do telefone)
+                agent = HCPneusAI.build_agent(session_id=phone_number)
                 
                 # Processar com o agente
-                ai_response, next_state = process_message(user_text, current_state)
-                
-                # Salvar estado
-                whatsapp_sessions[phone_number] = next_state
+                run_response = agent.run(user_text)
+                ai_response = run_response.content
 
                 # Enviar resposta de volta via Evolution API
                 evolution_api.send_text(phone_number, ai_response)
