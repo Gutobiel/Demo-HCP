@@ -4,7 +4,6 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 import re
 import math
 import time
@@ -31,8 +30,7 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
 
     try:
         print(f"Iniciando navegador Chrome para buscar: {car_brand} {car_model} {car_year} {car_version}...")
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver = webdriver.Chrome(options=chrome_options)
         driver.set_page_load_timeout(20)
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
