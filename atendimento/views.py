@@ -46,17 +46,29 @@ def whatsapp_webhook(request):
     if request.method == "POST":
         try:
             data = json.loads(request.body)
-            # A estrutura da Evolution API v2 para MESSAGES_UPSERT
-            if data.get("event") == "messages.upsert":
-                msg_info = data.get("data", {})
+            print("\n========== WEBHOOK ZDG ==========")
+            print(json.dumps(data, indent=2))
+            print("=================================\n")
+            
+            # Suporta ZDG (method) ou Evolution Local (event)
+            is_zdg = "method" in data
+            event_type = data.get("method") if is_zdg else data.get("event")
+
+            if event_type in ["message", "messages.upsert"]:
+                msg_info = data.get("msg", {}) if is_zdg else data.get("data", {})
                 is_from_me = msg_info.get("key", {}).get("fromMe")
                 
                 if is_from_me:
                     return JsonResponse({"status": "ignored_self"})
 
-                remote_jid = msg_info.get("key", {}).get("remoteJid")
-                # Extrair o número sem o @s.whatsapp.net
-                phone_number = remote_jid.split("@")[0]
+                # ZDG usa "sender_pn" ou "peer_recipient_pn" para o número. Evolution usa "remoteJid".
+                key_info = msg_info.get("key", {})
+                if is_zdg:
+                    remote_raw = key_info.get("sender_pn") or key_info.get("peer_recipient_pn", "")
+                else:
+                    remote_raw = key_info.get("remoteJid", "")
+                    
+                phone_number = remote_raw.split("@")[0] if remote_raw else ""
                 
                 # Texto da mensagem (pode estar em message.conversation ou extendedTextMessage)
                 message_content = msg_info.get("message", {})

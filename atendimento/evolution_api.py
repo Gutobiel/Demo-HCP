@@ -17,10 +17,14 @@ EVOLUTION_INSTANCE_NAME = os.getenv("EVOLUTION_INSTANCE_NAME", "hcpneus-bot")
 
 def _headers():
     """Retorna os headers padrão para as requisições."""
-    return {
-        "apikey": EVOLUTION_API_KEY,
+    headers = {
         "Content-Type": "application/json",
     }
+    if EVOLUTION_API_KEY and EVOLUTION_API_KEY.startswith("ey"):
+        headers["Authorization"] = f"Bearer {EVOLUTION_API_KEY}"
+    else:
+        headers["apikey"] = EVOLUTION_API_KEY
+    return headers
 
 
 def create_instance(instance_name=None):
@@ -67,14 +71,22 @@ def get_qrcode(instance_name=None):
 def send_text(number, text, instance_name=None):
     """
     Envia uma mensagem de texto via WhatsApp.
-    POST /message/sendText/{instance}
     """
     name = instance_name or EVOLUTION_INSTANCE_NAME
-    url = f"{EVOLUTION_API_URL}/message/sendText/{name}"
-    payload = {
-        "number": number,
-        "text": text,
-    }
+    if "zdg.com.br" in EVOLUTION_API_URL:
+        # ZDG API External Wrapper Abstract URL
+        url = EVOLUTION_API_URL
+        payload = {
+            "number": number,
+            "body": text,
+            "externalKey": "bot_reply"
+        }
+    else:
+        url = f"{EVOLUTION_API_URL}/message/sendText/{name}"
+        payload = {
+            "number": number,
+            "text": text,
+        }
 
     try:
         resp = requests.post(url, json=payload, headers=_headers(), timeout=15)
