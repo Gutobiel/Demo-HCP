@@ -10,14 +10,15 @@ from .knowledge_base import buscar_conhecimento
 # Define the state schema
 class AgentState(TypedDict):
     messages: list
+    is_buying_intent: bool # True se o usuário demonstrou interesse em pesquisar/cotar pneus
     car_marca: str
     car_modelo: str
     car_ano: str
     car_versao: str
     aro: str
-    catalog_results: list
+    catalog_results: dict
     recommendation_given: bool
-    dados_confirmados: bool  # True quando o cliente confirma os dados
+    dados_confirmados: bool
 
 
 def _build_conversation_context(state: AgentState, max_messages: int = 10) -> str:
@@ -78,18 +79,13 @@ def parse_intent_and_extract(state: AgentState):
     
     ÚLTIMA MENSAGEM DO CLIENTE: "{user_msg}"
     
-    O cliente pode informar vários dados de uma vez. Exemplo:
-    "Nissan March 2015 1.0" → marca=Nissan, modelo=March, ano=2015, versão=1.0
-    "Corolla 2020 XEI aro 17" → modelo=Corolla, ano=2020, versão=XEI, aro=17
-    "14" (quando o consultor perguntou pelo aro) → aro=14
+    Além dos dados do veículo, determine a INTENÇÃO de compra ('is_buying_intent'):
+    - Se o cliente citou dados do carro, perguntou preço, pediu recomendações de pneu, ou usou o funil atual: true
+    - Se ele disse apenas "olá", fez uma pergunta genérica não focada em orçamento/compra no momento: false
+    - Se no passado ele já estava cotando (estado atual tem dados do carro), mantenha true.
     
-    CONTEXTO IMPORTANTE: Se o consultor perguntou algo específico e o cliente respondeu com um número ou palavra curta,
-    interprete como resposta à pergunta feita. Exemplos:
-    - Consultor perguntou "qual o aro?" e cliente disse "14" → aro=14
-    - Consultor perguntou "qual o ano?" e cliente disse "2015" → ano=2015
-    - Consultor perguntou "qual a marca?" e cliente disse "Toyota" → marca=Toyota
-    
-    Estado atual (informações JÁ coletadas):
+    Estado atual:
+    - Já estava comprando/cotando? {state.get('is_buying_intent', False)}
     - Marca: {state.get('car_marca') or 'Não informado'}
     - Modelo: {state.get('car_modelo') or 'Não informado'}
     - Ano: {state.get('car_ano') or 'Não informado'}
@@ -103,6 +99,7 @@ def parse_intent_and_extract(state: AgentState):
     
     RESPONDA SOMENTE O JSON, sem texto adicional:
     {{
+        "is_buying_intent": true ou false,
         "car_marca": "valor ou null",
         "car_modelo": "valor ou null",
         "car_ano": "valor ou null",
@@ -116,7 +113,6 @@ def parse_intent_and_extract(state: AgentState):
     )
 
     try:
-        # Limpar a resposta (remover markdown code blocks se houver)
         content = response.content.strip()
         if content.startswith("```"):
             content = content.split("\n", 1)[1] if "\n" in content else content
@@ -125,11 +121,14 @@ def parse_intent_and_extract(state: AgentState):
         
         extracted = json.loads(content)
 
-        # Atualizar TODOS os campos que vieram preenchidos (não "null")
+        # Atualiza a intenção de compra
+        state["is_buying_intent"] = extracted.get("is_buying_intent", state.get("is_buying_intent", False))
+
         for key in ["car_marca", "car_modelo", "car_ano", "car_versao", "aro"]:
             value = extracted.get(key)
             if value and str(value).lower() not in ("null", "none", "não informado"):
                 state[key] = str(value)
+                state["is_buying_intent"] = True # Se passou dados de carro, a intenção vira True.
 
     except Exception as e:
         print(f"Erro no parse de intenção: {e}")
@@ -140,27 +139,22 @@ def parse_intent_and_extract(state: AgentState):
 
 def router_node(state: AgentState):
     """Decides what the agent should do next based on missing info."""
-    # Se os dados foram confirmados, ir direto para o catálogo
     if state.get("dados_confirmados") and not state.get("recommendation_given"):
         return "consult_catalog"
+        
+    if state.get("recommendation_given"):
+        return "general_chat"
+        
+    if not state.get("is_buying_intent"):
+        return "general_chat"
     
-    if not state.get("car_marca"):
-        return "ask_brand"
-    if not state.get("car_modelo"):
-        return "ask_model"
-    if not state.get("car_ano"):
-        return "ask_year"
-    if not state.get("car_versao"):
-        return "ask_version"
-    if not state.get("aro"):
-        return "ask_rim"
+    # Se está no funil de vendas, validar os campos faltantes
+    if not state.get("car_marca") or not state.get("car_modelo") or not state.get("car_ano") or not state.get("car_versao") or not state.get("aro"):
+        return "ask_missing_info"
     
-    # Todos os campos preenchidos mas não confirmados → confirmar
     if not state.get("dados_confirmados"):
         return "confirm_data"
-    
-    if not state.get("recommendation_given"):
-        return "consult_catalog"
+        
     return END
 
 
@@ -173,13 +167,8 @@ def confirm_data(state: AgentState):
     aro = state.get("aro", "")
 
     msg = (
-        f"Perfeito! Deixa eu confirmar os dados do seu veículo:\n\n"
-        f"🚗 **Marca:** {marca}\n"
-        f"📋 **Modelo:** {modelo}\n"
-        f"📅 **Ano:** {ano}\n"
-        f"⚙️ **Versão:** {versao}\n"
-        f"🔧 **Aro:** {aro}\n\n"
-        f"Está tudo correto? Se sim, vou buscar as melhores opções de pneus para você!"
+        f"Perfeito, peguei as especificações! Só para confirmar, vamos de **{marca} {modelo} {ano} {versao} (Aro {aro})**?\n\n"
+        f"Se estiver correto, é só confirmar que eu já busco as opções pra você!"
     )
     state["messages"].append(AIMessage(content=msg))
     return state
@@ -241,9 +230,10 @@ def generate_consultative_question(state: AgentState, question_type: str):
 
     INSTRUÇÕES:
     - {saudacao_instrucao}
-    - Seja cordial e profissional, mas BREVE.
-    - NÃO repita informações que o cliente já forneceu.
-    - Se o cliente perguntar algo técnico, responda usando o CONHECIMENTO TÉCNICO antes de pedir a próxima informação.
+    - Seja conversacional, natural, direito ao ponto e aja como um vendedor humano experiente.
+    - NUNCA repita o que o cliente acabou de escrever, apenas dê sequência na conversa lendo a "CONVERSA ATÉ AGORA".
+    - Se o cliente já passou os dados de uma vez, avance as perguntas sem ficar repetindo os itens individualmente.
+    - Se o cliente perguntar algo técnico, responda usando o CONHECIMENTO TÉCNICO de forma bem resumida.
     - Já sabemos do veículo: {dados_str}
     
     CONVERSA ATÉ AGORA:
@@ -255,29 +245,85 @@ def generate_consultative_question(state: AgentState, question_type: str):
     response = llm.invoke([SystemMessage(content=sys_prompt), HumanMessage(content=user_msg)])
     return response.content
 
-def ask_brand(state: AgentState):
-    res = generate_consultative_question(state, "brand")
-    state["messages"].append(AIMessage(content=res))
+def ask_missing_info(state: AgentState):
+    """Descobre qual info está faltando e faz a pergunta correta usando a IA."""
+    falta_tipo = None
+    if not state.get("car_marca"):
+        falta_tipo = "brand"
+    elif not state.get("car_modelo"):
+        falta_tipo = "model"
+    elif not state.get("car_ano"):
+        falta_tipo = "year"
+    elif not state.get("car_versao"):
+        falta_tipo = "version"
+    elif not state.get("aro"):
+        falta_tipo = "rim"
+        
+    if falta_tipo:
+        res = generate_consultative_question(state, falta_tipo)
+        state["messages"].append(AIMessage(content=res))
     return state
 
-def ask_model(state: AgentState):
-    res = generate_consultative_question(state, "model")
-    state["messages"].append(AIMessage(content=res))
-    return state
+def general_chat(state: AgentState):
+    """Bate papo livre e responde a dúvidas, terminando com um gancho sutil para pneus e fechamento de vendas se produtos foram recomendados."""
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+    user_msg = state["messages"][-1].content if state["messages"] else "Olá"
+    conhecimento = buscar_conhecimento(user_msg)
+    conversa = _build_conversation_context(state, max_messages=4)
+    is_first = _is_first_interaction(state)
+    
+    saudacao = "Se for a primeira mensagem, dê boas vindas calorosas à HC Pneus (só use se não tiver dado boas vindas antes)." if is_first else "Não fique repetindo saudações e seja fluído."
 
-def ask_year(state: AgentState):
-    res = generate_consultative_question(state, "year")
-    state["messages"].append(AIMessage(content=res))
-    return state
+    contexto_recomendacao = ""
+    objetivos_finais = ""
+    produtos_apresentados = ""
+    
+    if state.get("recommendation_given"):
+        results_dict = state.get("catalog_results", {})
+        products = results_dict.get("products", []) if isinstance(results_dict, dict) else results_dict
+        
+        objetivos_extras = ""
+        if products:
+            produtos_apresentados = "\nPRODUTOS APRESENTADOS RECENTEMENTE E SEUS LINKS NO SISTEMA (MEMÓRIA DA IA):\n"
+            for i, p in enumerate(products, 1):
+                produtos_apresentados += f"Modelo {i}: {p.get('nome_modelo')} | Preço: {p.get('preco_desconto', p.get('preco'))} | Link: {p.get('link_produto')}\n"
+                
+            objetivos_extras = """
+            ATENÇÃO PARA FLUXO DE COMPRA:
+            Se o cliente demonstrar que escolheu um dos modelos apresentados ou confirmou a única opção disponível (ex: 'sim', 'quero esse mesmo', 'isso', 'quero o modelo 2', 'pode ser'), SUA MISSÃO FINAL É:
+            - Diga: "Que ótimo! Você pode concluir a compra através do link abaixo: [Comprar Pneu Agora](Link da URL) Se precisar de mais alguma coisa, estou à disposição!"
+            - O Link OBRIGATORIAMENTE DEVE estar no formato correto Markdown com a URL correspondente buscada da memória.
+            """
+            
+        contexto_recomendacao = f"Atenção: Você JÁ apresentou opções de pneus para o cliente em mensagens passadas. {objetivos_extras}"
+        objetivos_finais = "Esclareça as dúvidas de orçamento/produtos. E OBRIGATORIAMENTE DE FORMAS CLARA E AMIGÁVEL: Se o cliente já escolheu e confirmou um produto, envie o link de compra dele."
+    else:
+        contexto_recomendacao = "Cenário: O cliente está apenas conversando ou tirando dúvidas iniciais, sem focar ativamente na cotação de pneus."
+        objetivos_finais = "Termine SEMPRE com um leve incentivo perguntando se ele gostaria de pesquisar pneus."
 
-def ask_version(state: AgentState):
-    res = generate_consultative_question(state, "version")
-    state["messages"].append(AIMessage(content=res))
-    return state
+    sys_prompt = f"""
+    Você é o Consultor Técnico da HC Pneus.
+    {contexto_recomendacao}
 
-def ask_rim(state: AgentState):
-    res = generate_consultative_question(state, "rim")
-    state["messages"].append(AIMessage(content=res))
+    {saudacao}
+
+    CONHECIMENTO DA BASE:
+    {conhecimento if conhecimento else '(Sem informações diretas da base de dados, mas você tem muita bagagem do mercado)'}
+
+    {produtos_apresentados}
+
+    CONVERSA RECENTE:
+    {conversa}
+
+    OBJETIVOS:
+    1. Responda diretamente ao cliente com simpatia.
+    2. Se ele fez uma pergunta, responda usando seu conhecimento ou o histórico.
+    3. {objetivos_finais}
+    4. NUNCA diga 'Cliente: ....' na sua resposta nem repita textos passados do cliente. Use listagens ou negritos (<b> ou **) para formatações visuais se desejar enriquecer sua resposta.
+    """
+    
+    response = llm.invoke([SystemMessage(content=sys_prompt), HumanMessage(content=user_msg)])
+    state["messages"].append(AIMessage(content=response.content))
     return state
 
 
@@ -292,27 +338,69 @@ def consult_catalog(state: AgentState):
 def recommend_tires(state: AgentState):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
 
-    results = state.get("catalog_results", [])
+    results_dict = state.get("catalog_results", {})
+    if isinstance(results_dict, list):
+        products = results_dict
+        count = str(len(products))
+    else:
+        products = results_dict.get("products", [])
+        count = results_dict.get("count")
+
     car_modelo = state.get("car_modelo", "")
     aro = state.get("aro", "")
 
-    if not results:
+    if not products:
         msg = f"Infelizmente não encontrei pneus aro {aro} para o {car_modelo} no momento em nosso site. Posso ajudar com mais alguma coisa?"
     else:
         products_text = ""
-        for i, p in enumerate(results):
-            products_text += f"\n- {p['nome_modelo']} | {p['preco']}"
+        count_str = f"Encontramos {count} produtos disponíveis.\n\n" if count else ""
+        for i, p in enumerate(products):
+            preco_vista = p.get('preco_desconto', p.get('preco', ''))
+            preco_orig = p.get('preco_original', '')
+            condicao = p.get('condicao', '')
+            
+            if preco_orig and preco_orig != "N/A":
+                texto_preco = f"De: <s>{preco_orig}</s> | Por: **{preco_vista} à vista**" 
+            else:
+                texto_preco = f"Por: **{preco_vista} à vista**"
+                
+            if condicao:
+                texto_preco += f" ou {condicao}"
+                
+            if len(products) == 1:
+                products_text += f"{p['nome_modelo']} | {texto_preco}"
+            else:
+                products_text += f"\n- Modelo {i+1}: {p['nome_modelo']} | {texto_preco}"
 
-        sys_prompt = f"""
-        Você é um vendedor entusiasta da HC Pneus.
-        O cliente possui um {car_modelo} usando aro {aro}.
-        Você consultou o sistema e tem estes produtos disponíveis:
-        {products_text}
-        
-        Gere uma resposta amigável recomendando esses pneus exatamente como vieram.
-        Se o sistema não trouxe marcas famosas ou apenas serviços/genéricos, mostre exatamente a lista de disponibilidade informando os preços para manter a agilidade.
-        Pergunte se o cliente deseja reservar. Pode usar <br> e <b> (HTML) para formatar bonito.
-        """
+        if len(products) == 1:
+            sys_prompt = f"""
+            Você é um vendedor especialista da HC Pneus.
+            O cliente possui um {car_modelo}.
+            Você encontrou APENAS ESTA OPÇÃO de pneu no estoque:
+            {products_text}
+            
+            Sua tarefa:
+            - Apresente a opção EXATAMENTE com este padrão de frase, sem floreios extras: "Encontrei este modelo disponível para o seu {car_modelo}: [DESCRIÇÃO DO PNEU E PREÇO]. É isso mesmo que você deseja?"
+            - Não informe que você "guardou os detalhes".
+            - Não liste como "Modelo 1".
+            - NÃO ENVIE O LINK DE COMPRA NESSA RESPOSTA.
+            """
+        else:
+            sys_prompt = f"""
+            Você é um vendedor especialista e objetivo da HC Pneus.
+            O cliente possui um {car_modelo} usando aro {aro}.
+            Você consultou o sistema e tem as seguintes opções:
+            {count_str}{products_text}
+            
+            Sua tarefa:
+            - Apresente as opções de forma clara, natural e MUITO PROFISSIONAL.
+            - SEM GÍRIAS, SEM EXCESSO DE EMOJIS e com TEXTOS CURTOS (vá direto ao ponto).
+            - Apresente os preços detalhados.
+            - Informe que você guardou todos os detalhes desses modelos.
+            - FINALIZAÇÃO OBRIGATÓRIA: Pergunte de forma explícita QUAL MODELO ele deseja confirmar para que você possa enviar o link da compra.
+            - NÃO ENVIE O LINK DE COMPRA AQUI. Apenas estimule o cliente a escolher um dos modelos primeiro.
+            """
+            
         response = llm.invoke([SystemMessage(content=sys_prompt)])
         msg = response.content
         state["recommendation_given"] = True
@@ -325,11 +413,8 @@ def recommend_tires(state: AgentState):
 workflow = StateGraph(AgentState)
 
 workflow.add_node("parse_intent", parse_intent_and_extract)
-workflow.add_node("ask_brand", ask_brand)
-workflow.add_node("ask_model", ask_model)
-workflow.add_node("ask_year", ask_year)
-workflow.add_node("ask_version", ask_version)
-workflow.add_node("ask_rim", ask_rim)
+workflow.add_node("ask_missing_info", ask_missing_info)
+workflow.add_node("general_chat", general_chat)
 workflow.add_node("confirm_data", confirm_data)
 workflow.add_node("consult_catalog", consult_catalog)
 workflow.add_node("recommend_tires", recommend_tires)
@@ -340,22 +425,16 @@ workflow.add_conditional_edges(
     "parse_intent",
     router_node,
     {
-        "ask_brand": "ask_brand",
-        "ask_model": "ask_model",
-        "ask_year": "ask_year",
-        "ask_version": "ask_version",
-        "ask_rim": "ask_rim",
+        "general_chat": "general_chat",
+        "ask_missing_info": "ask_missing_info",
         "confirm_data": "confirm_data",
         "consult_catalog": "consult_catalog",
         END: END,
     },
 )
 
-workflow.add_edge("ask_brand", END)
-workflow.add_edge("ask_model", END)
-workflow.add_edge("ask_year", END)
-workflow.add_edge("ask_version", END)
-workflow.add_edge("ask_rim", END)
+workflow.add_edge("general_chat", END)
+workflow.add_edge("ask_missing_info", END)
 workflow.add_edge("confirm_data", END)
 workflow.add_edge("consult_catalog", "recommend_tires")
 workflow.add_edge("recommend_tires", END)
@@ -366,12 +445,13 @@ def process_message(user_message: str, current_state: dict):
     if not current_state:
         current_state = {
             "messages": [],
+            "is_buying_intent": False,
             "car_marca": None,
             "car_modelo": None,
             "car_ano": None,
             "car_versao": None,
             "aro": None,
-            "catalog_results": [],
+            "catalog_results": {},
             "recommendation_given": False,
             "dados_confirmados": False,
         }

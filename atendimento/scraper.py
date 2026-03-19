@@ -70,36 +70,66 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
                         break
                     time.sleep(0.5)
 
-                found = False
+                best_opt = None
+                best_score = -1
+                search_words = value_text.lower().split()
+
                 for opt in options:
                     try:
-                        # Usar textContent para pegar o label mesmo que não esteja visível
                         txt = opt.get_attribute('textContent')
                         if not txt: continue
                         txt = txt.strip()
+                        txt_lower = txt.lower()
                         
-                        if value_text.lower() in txt.lower() and txt:
-                            print(f"Encontrou: {txt}. Selecionando...")
-                            try:
-                                click_element(opt)
-                                time.sleep(2) # Wait for AJAX dependency
-                                found = True
-                                break
-                            except Exception as click_err:
-                                print(f"Erro ao clicar na opção {txt}: {click_err}")
-                                # Tenta pelo valor se o clique falhar
-                                val = opt.get_attribute('value')
-                                driver.execute_script(f"arguments[0].value = '{val}'; arguments[0].dispatchEvent(new Event('change'));", select_el)
-                                time.sleep(2)
-                                found = True
-                                break
+                        if 'selecione' in txt_lower:
+                            continue
+                            
+                        score = 0
+                        if value_text.lower() == txt_lower:
+                            score = 100
+                        elif value_text.lower() in txt_lower:
+                            score = 80
+                        else:
+                            matches = sum(1 for w in search_words if w in txt_lower)
+                            if matches > 0:
+                                score = 10 * matches
+                        
+                        if score > best_score:
+                            best_score = score
+                            best_opt = opt
+                            
                     except Exception as opt_err:
-                        print(f"Erro ao processar opção: {opt_err}")
                         continue
                 
-                if not found:
-                    print(f"AVISO: '{value_text}' não encontrado. Opções: {[o.get_attribute('textContent').strip() for o in options[:8] if o.get_attribute('textContent')]}...")
-                return found
+                if best_opt and best_score > 0:
+                    txt = best_opt.get_attribute('textContent').strip()
+                    print(f"Melhor opção para '{value_text}' foi '{txt}' (Score: {best_score}). Selecionando...")
+                    try:
+                        click_element(best_opt)
+                        time.sleep(2) # Wait for AJAX dependency
+                        return True
+                    except Exception as click_err:
+                        val = best_opt.get_attribute('value')
+                        driver.execute_script(f"arguments[0].value = '{val}'; arguments[0].dispatchEvent(new Event('change'));", select_el)
+                        time.sleep(2)
+                        return True
+                
+                if valid_options:
+                    primeira_valida = valid_options[0]
+                    txt = primeira_valida.get_attribute('textContent').strip()
+                    print(f"AVISO: '{value_text}' não encontrado. Forçando seleção na primeira válida: '{txt}'...")
+                    try:
+                        click_element(primeira_valida)
+                        time.sleep(2)
+                        return True
+                    except:
+                        val = primeira_valida.get_attribute('value')
+                        driver.execute_script(f"arguments[0].value = '{val}'; arguments[0].dispatchEvent(new Event('change'));", select_el)
+                        time.sleep(2)
+                        return True
+
+                print(f"AVISO: '{value_text}' não encontrado e não há opções válidas.")
+                return False
             except Exception as e:
                 print(f"Erro no dropdown {xpath}: {e}")
                 return False
@@ -115,81 +145,164 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
         click_element(buscar_btn)
         
         # Aguardar resultado (nova página ou lista via AJAX)
-        time.sleep(6)
-        
         live_results = []
+        total_resultados = None
         try:
-            # Tentar encontrar os produtos na nova página
-            # Vamos buscar por seletores comuns de produtos
-            product_selectors = [
-                 ".item.product.product-item",
-                 ".showcase-item",
-                 ".product-card",
-                 "div[class*='product']",
-                 "li[class*='product']"
-            ]
+            # Tentar pegar a quantidade de resultados
+            try:
+                count_el = driver.find_element(By.CSS_SELECTOR, ".product-count span")
+                count_text = count_el.text.strip()
+                match = re.search(r'\d+', count_text)
+                if match:
+                    total_resultados = match.group()
+            except:
+                pass
+
+            # Detecta se foi redirecionado para a página de um produto único
+            is_single_product = len(driver.find_elements(By.CSS_SELECTOR, ".product-name h3")) > 0 or len(driver.find_elements(By.CSS_SELECTOR, "h1.page-title")) > 0
             
-            items = []
-            for selector in product_selectors:
-                found_items = driver.find_elements(By.CSS_SELECTOR, selector)
-                if len(found_items) > 3:
-                    items = found_items
-                    print(f"Encontrou {len(items)} produtos usando o seletor {selector}")
-                    break
-            
-            if not items:
-                # Fallback: pegar qualquer coisa que pareça um item
-                items = driver.find_elements(By.CSS_SELECTOR, "div[class*='item']")
-                print(f"Fallback: encontrou {len(items)} itens genéricos")
-            
-            # Extrair apenas os números informados pelo usuário: "Aro 16" -> "16"
-            aro_match = re.search(r'\d+', str(rim_size))
-            aro_num = aro_match.group(0) if aro_match else str(rim_size)
-            print(f"Filtrando resultados pelo aro: {aro_num}")
-            
-            for item in items:
-                text_content = item.text.strip()
-                if not text_content or len(text_content) < 20: continue
+            if is_single_product:
+                print("Página de produto único diretamente carregada.")
+                try:
+                    nome = driver.find_element(By.CSS_SELECTOR, ".product-name h3").text.strip()
+                except:
+                    try:
+                        nome = driver.find_element(By.CSS_SELECTOR, "h1.page-title").text.strip()
+                    except:
+                        nome = driver.title
                 
-                # Filtrar pelo aro exato no título do produto (ex "205/55R16")
-                if aro_num and aro_num not in text_content:
-                    continue
+                try:
+                    marca = driver.find_element(By.CSS_SELECTOR, ".brand-text").text.strip()
+                except:
+                    marca = nome.split()[0] if nome else car_brand
+                
+                try:
+                    preco_original = driver.find_element(By.CSS_SELECTOR, ".list-price span, .old-price .price, [data-price-type='oldPrice'] .price").text.strip()
+                except:
+                    preco_original = "N/A"
                     
-                if 'Pneu' in text_content or 'pneu' in text_content.lower():
-                    linhas = [l.strip() for l in text_content.split('\n') if l.strip()]
+                try:
+                    preco_desconto = driver.find_element(By.CSS_SELECTOR, "span.instant-price, .special-price .price, [data-price-type='finalPrice'] .price").text.strip()
+                except:
+                    try:
+                        preco_desconto = driver.find_element(By.CSS_SELECTOR, ".price").text.strip()
+                    except:
+                        preco_desconto = "N/A"
+                        
+                try:
+                    condicao = driver.find_element(By.CSS_SELECTOR, ".condition").text.strip()
+                except:
+                    condicao = ""
+                        
+                live_results.append({
+                    "marca": marca,
+                    "nome_modelo": nome,
+                    "preco_original": preco_original,
+                    "preco_desconto": preco_desconto,
+                    "condicao": condicao,
+                    "preco": preco_desconto, # Fallback
+                    "link_produto": driver.current_url
+                })
+            else:
+                # Vamos buscar por seletores comuns de produtos na listagem
+                product_selectors = [
+                     ".wd-browsing-grid-list .product-item",
+                     ".wd-browsing-grid-list li",
+                     ".item.product.product-item",
+                     "li.product-item",
+                     ".product-card",
+                     "div[class*='product']"
+                ]
+                
+                items = []
+                for selector in product_selectors:
+                    found_items = driver.find_elements(By.CSS_SELECTOR, selector)
+                    if len(found_items) > 0:
+                        items = found_items
+                        print(f"Encontrou {len(items)} produtos usando o seletor {selector}")
+                        break
+                
+                for item in items:
+                    text_content = item.text.strip()
+                    if not text_content: continue
+                    
+                    # Extração segura do Nome do produto
                     nome = None
-                    preco = None
+                    try:
+                        nome = item.get_attribute("data-name")
+                    except:
+                        pass
                     
-                    # Tentar achar o nome (geralmente a linha mais longa com Pneu)
-                    for linha in linhas:
-                        if 'Pneu' in linha or '/' in linha:
-                            nome = linha
-                            break
-                    
-                    # Tentar achar o preço
-                    for linha in linhas:
-                        if 'R$' in linha or 'R $' in linha:
-                            preco = linha
-                            break
+                    if not nome:
+                        try:
+                            nome_el = item.find_element(By.CSS_SELECTOR, "[data-name]")
+                            nome = nome_el.get_attribute("data-name")
+                        except:
+                            pass
                             
-                    if nome and preco:
-                        marca = nome.split()[0] if nome else car_brand
-                        live_results.append({
-                            "marca": marca,
-                            "nome_modelo": nome,
-                            "preco": preco,
-                            "link_produto": driver.current_url
-                        })
-                        if len(live_results) >= 5:
-                            break
+                    if not nome:
+                        try:
+                            nome = item.find_element(By.CSS_SELECTOR, ".product-item-link, .product-item-name, .product-name").text.strip()
+                        except:
+                            linhas = [l.strip() for l in text_content.split('\n') if l.strip()]
+                            nome = linhas[0] if linhas else None
+
+                    # Extração do Preço Original (De)
+                    try:
+                        preco_original = item.find_element(By.CSS_SELECTOR, ".list-price span, .old-price .price, [data-price-type='oldPrice'] .price").text.strip()
+                    except:
+                        preco_original = "N/A"
+                        
+                    # Extração do Preço de Desconto (Por)
+                    try:
+                        preco_desconto = item.find_element(By.CSS_SELECTOR, ".instant-price, .special-price .price, [data-price-type='finalPrice'] .price").text.strip()
+                    except:
+                        try:
+                            # Se não tem antigo/novo, tenta pegar apenas o preço normal
+                            preco_desconto = item.find_element(By.CSS_SELECTOR, ".price").text.strip()
+                        except:
+                            preco_desconto = "N/A"
+                            
+                    # Extração da condição de pagamento
+                    try:
+                        condicao = item.find_element(By.CSS_SELECTOR, ".condition").text.strip()
+                    except:
+                        condicao = ""
+                            
+                    # Se não foi possível encontrar nome e preço pelos seletores, tenta extrair por texto
+                    if not nome or preco_desconto == "N/A":
+                        continue
+                        
+                    nome_str = nome.lower() if nome else ""
+                    if 'pneu' not in nome_str and 'pneu' not in text_content.lower():
+                        continue
+                        
+                    try:
+                        link_produto = item.find_element(By.TAG_NAME, "a").get_attribute("href")
+                    except:
+                        link_produto = driver.current_url
+
+                    marca = nome.split()[0] if nome else car_brand
+                    live_results.append({
+                        "marca": marca,
+                        "nome_modelo": nome,
+                        "preco_original": preco_original,
+                        "preco_desconto": preco_desconto,
+                        "condicao": condicao,
+                        "preco": preco_desconto,
+                        "link_produto": link_produto
+                    })
+                    
+                    if len(live_results) >= 10: # Retorna os top 10 resultados
+                        break
         except Exception as sel_err:
             print(f"Erro ao extrair dados dos produtos: {sel_err}")
 
         driver.quit()
 
-        if live_results:
-            print("Produtos extraídos do site real!")
-            return live_results
+        if live_results or total_resultados:
+            print(f"Produtos extraídos do site real! Total encontrado: {total_resultados}")
+            return {"count": total_resultados, "products": live_results}
 
     except Exception as e:
         print(f"Erro no fluxo Selenium: {e}")
@@ -202,21 +315,22 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
     print("Selenium falhou. Usando banco virtual de contingência (Mock).")
     mock_database = {
         "14": [
-            {"marca": "Goodyear", "nome_modelo": "Pneu Goodyear 175/70R14 Direction Touring 2", "preco": "R$ 389,00", "link_produto": "https://www.hcpneus.com.br/"},
+            {"marca": "Goodyear", "nome_modelo": "Pneu Goodyear 175/70R14 Direction Touring 2", "preco": "R$ 389,00", "link_produto": "https://www.hcpneus.com.br/", "condicao": "6x de R$ 64,83 sem juros"},
         ],
         "15": [
-            {"marca": "Michelin", "nome_modelo": "Pneu Michelin 195/65R15 Energy XM2+", "preco": "R$ 519,90", "link_produto": "https://www.hcpneus.com.br/"},
+            {"marca": "Michelin", "nome_modelo": "Pneu Michelin 195/65R15 Energy XM2+", "preco": "R$ 519,90", "link_produto": "https://www.hcpneus.com.br/", "condicao": "6x de R$ 86,65 sem juros"},
         ],
         "16": [
-            {"marca": "Michelin", "nome_modelo": "Pneu Michelin 205/55R16 Primacy 4+", "preco": "R$ 629,00", "link_produto": "https://www.hcpneus.com.br/"},
+            {"marca": "Michelin", "nome_modelo": "Pneu Michelin 205/55R16 Primacy 4+", "preco": "R$ 629,00", "link_produto": "https://www.hcpneus.com.br/", "condicao": "6x de R$ 104,83 sem juros"},
         ]
     }
     
     aro_match_mock = re.search(r'\d+', str(rim_size))
     an = aro_match_mock.group(0) if aro_match_mock else "16"
-    return mock_database.get(an, [
-        {"marca": car_brand, "nome_modelo": f"Pneu Premium {car_brand} {car_model} Aro {an}", "preco": "Sob consulta", "link_produto": "https://www.hcpneus.com.br/"}
+    mock_res = mock_database.get(an, [
+        {"marca": car_brand, "nome_modelo": f"Pneu Premium {car_brand} {car_model} Aro {an}", "preco": "Sob consulta", "link_produto": "https://www.hcpneus.com.br/", "condicao": ""}
     ])
+    return {"count": len(mock_res), "products": mock_res}
 
 if __name__ == "__main__":
     produtos = buscar_pneus_no_site("Toyota", "Corolla", "2018", "XEI", "16")
