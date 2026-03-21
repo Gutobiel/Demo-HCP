@@ -4,6 +4,7 @@ from django.views.decorators.csrf import csrf_exempt
 import json
 import logging
 import re
+import time
 
 from .agent import process_message
 from . import evolution_api
@@ -29,12 +30,22 @@ def chat_api(request):
             # Recuperar estado da sessão (ou criar novo)
             session_state = whatsapp_sessions.get(session_id, {})
             
-            response_text, new_state = process_message(user_message, session_state)
+            response_messages, new_state = process_message(user_message, session_state)
             
             # Salvar estado atualizado
             whatsapp_sessions[session_id] = new_state
             
-            return JsonResponse({"response": response_text})
+            # Para o web chat, retornar a primeira mensagem de texto
+            # e indicar se há imagens pendentes
+            text_response = ""
+            images = []
+            for msg in response_messages:
+                if msg["type"] == "text":
+                    text_response = msg["content"]
+                elif msg["type"] == "image":
+                    images.append({"caption": msg.get("caption", "")})
+            
+            return JsonResponse({"response": text_response, "images": images})
         except Exception as e:
             logger.error(f"Erro na chat_api: {e}")
             return JsonResponse({"error": str(e)}, status=500)
@@ -64,11 +75,16 @@ def whatsapp_webhook(request):
                 # ZDG usa "sender_pn" ou "peer_recipient_pn" para o número. Evolution usa "remoteJid".
                 key_info = msg_info.get("key", {})
                 if is_zdg:
-                    remote_raw = key_info.get("sender_pn") or key_info.get("peer_recipient_pn", "")
+                    remote_raw = key_info.get("sender_pn") or key_info.get("peer_recipient_pn") or key_info.get("remoteJid", "")
                 else:
                     remote_raw = key_info.get("remoteJid", "")
                     
                 phone_number = remote_raw.split("@")[0] if remote_raw else ""
+                
+                # Guard: Se não tem número de telefone, ignorar
+                if not phone_number:
+                    print(f"AVISO: Número de telefone vazio. remote_raw='{remote_raw}', key_info={key_info}")
+                    return JsonResponse({"status": "no_phone"})
                 
                 # Texto da mensagem (pode estar em message.conversation ou extendedTextMessage)
                 message_content = msg_info.get("message", {})
@@ -79,18 +95,27 @@ def whatsapp_webhook(request):
                     return JsonResponse({"status": "no_text"})
 
                 logger.info(f"Mensagem recebida de {phone_number}: {user_text}")
+                print(f">>> Processando mensagem de {phone_number}: {user_text}")
 
                 # Recuperar ou iniciar estado do agente para este número
                 current_state = whatsapp_sessions.get(phone_number, {})
                 
                 # Processar com o agente
-                ai_response, next_state = process_message(user_text, current_state)
+                response_messages, next_state = process_message(user_text, current_state)
                 
                 # Salvar estado
                 whatsapp_sessions[phone_number] = next_state
 
-                # Enviar resposta de volta via Evolution API
-                evolution_api.send_text(phone_number, ai_response)
+                # Enviar cada mensagem de resposta em sequência
+                for msg in response_messages:
+                    if msg["type"] == "text":
+                        evolution_api.send_text(phone_number, msg["content"])
+                    elif msg["type"] == "image":
+                        evolution_api.send_image(phone_number, msg["path"], msg.get("caption", ""))
+                    
+                    # Pequeno delay entre mensagens para manter ordem no WhatsApp
+                    if len(response_messages) > 1:
+                        time.sleep(1)
 
             return JsonResponse({"status": "success"})
         except Exception as e:

@@ -1,10 +1,11 @@
 import os
 import json
-from typing import Dict, TypedDict, Any
+from typing import Dict, TypedDict, Any, List
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langgraph.graph import StateGraph, END
-from .scraper import buscar_pneus_no_site
+from .scraper_search import buscar_pneus_no_site
+from .scraper_screenshot import screenshot_produto
 from .knowledge_base import buscar_conhecimento
 
 # Define the state schema
@@ -19,6 +20,8 @@ class AgentState(TypedDict):
     catalog_results: dict
     recommendation_given: bool
     dados_confirmados: bool
+    pending_images: list  # Lista de imagens pendentes para envio [{"path": ..., "caption": ...}]
+    produto_escolhido_idx: int  # Índice do produto escolhido pelo cliente (Fluxo 2)
 
 
 def _build_conversation_context(state: AgentState, max_messages: int = 10) -> str:
@@ -264,6 +267,47 @@ def ask_missing_info(state: AgentState):
         state["messages"].append(AIMessage(content=res))
     return state
 
+def _detect_product_choice(user_msg: str, products: list) -> int:
+    """
+    Detecta se o cliente escolheu um produto específico.
+    Retorna o índice (0-based) do produto escolhido, ou -1 se não detectou.
+    """
+    msg_lower = user_msg.strip().lower()
+    
+    import re
+    # 1. Padrões claros: "opcao 6", "modelo 2", "produto 1", "item 3"
+    match = re.search(r'(?:op[cç][aã]o|modelo|produto|item|pneu)\s*(\d+)', msg_lower)
+    if match:
+        idx = int(match.group(1)) - 1
+        if 0 <= idx < len(products):
+            return idx
+            
+    # 2. Número solto (ex: "3", "3.", "eu quero o 3")
+    # Usa \b para não pegar o 1 de "175/70"
+    match_num = re.search(r'\b(\d+)\b', msg_lower)
+    if match_num:
+        idx = int(match_num.group(1)) - 1
+        # Cuidado para não confundir o número do aro ("aro 14") com a opção "14"
+        if 0 <= idx < len(products) and not re.search(r'(?:aro|r)\s*\d+', msg_lower):
+            return idx
+            
+    # 3. Textos ordinais ("primeiro", "segundo")
+    ordinais = {"primeir": 0, "segund": 1, "terceir": 2, "quart": 3, "quint": 4, 
+                "sext": 5, "setim": 6, "sétim": 6, "oitav": 7, "non": 8, "decim": 9, "décim": 9}
+    for word, idx in ordinais.items():
+        if word in msg_lower and idx < len(products):
+            return idx
+    
+    # 4. Confirmação genérica para quando há apenas 1 produto
+    if len(products) == 1:
+        confirmacao = ["sim", "isso", "quero", "pode ser", "esse mesmo", "esse",
+                       "quero esse", "ok", "certo", "perfeito", "bora", "confirmo", "ele mesmo"]
+        if any(w in msg_lower for w in confirmacao):
+            return 0
+            
+    return -1
+
+
 def general_chat(state: AgentState):
     """Bate papo livre e responde a dúvidas, terminando com um gancho sutil para pneus e fechamento de vendas se produtos foram recomendados."""
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
@@ -282,21 +326,93 @@ def general_chat(state: AgentState):
         results_dict = state.get("catalog_results", {})
         products = results_dict.get("products", []) if isinstance(results_dict, dict) else results_dict
         
+        # === FLUXO 1 E 2: Lógica de Conversão (Detecção de escolha e confirmação) ===
+        already_chosen_idx = state.get("produto_escolhido_idx", -1)
+        detected_idx = _detect_product_choice(user_msg, products) if products else -1
+        
+        current_chosen_idx = already_chosen_idx
+        is_final_confirmation = False
+        just_chose_now = False
+        
+        if products:
+            if len(products) == 1:
+                # Fluxo 1: Se detectou interesse, já é a confirmação final direto (o robô já mandou a imagem antes)
+                if detected_idx == 0:
+                    is_final_confirmation = True
+                    current_chosen_idx = 0
+            else:
+                # Fluxo 2: Requer 2 passos (escolher modelo -> confirmar foto)
+                if already_chosen_idx >= 0:
+                    confirmacao = ["sim", "isso", "quero", "pode ser", "esse", "ok", "certo", "perfeito", "confirmo", "manda", "bora"]
+                    user_lower = user_msg.strip().lower()
+                    
+                    if detected_idx >= 0 and detected_idx != already_chosen_idx:
+                        # Mudou de ideia e escolheu outro modelo
+                        just_chose_now = True
+                        current_chosen_idx = detected_idx
+                    elif any(w in user_lower for w in confirmacao) or detected_idx == already_chosen_idx:
+                        # Confirmou explicitamente a foto enviada no turno anterior
+                        is_final_confirmation = True
+                elif detected_idx >= 0:
+                    # Acabou de escolher um modelo pela primeira vez
+                    just_chose_now = True
+                    current_chosen_idx = detected_idx
+
+        # Atualiza o estado com a escolha atual
+        if current_chosen_idx >= 0:
+            state["produto_escolhido_idx"] = current_chosen_idx
+
+        produtos_apresentados = ""
         objetivos_extras = ""
+        
         if products:
             produtos_apresentados = "\nPRODUTOS APRESENTADOS RECENTEMENTE E SEUS LINKS NO SISTEMA (MEMÓRIA DA IA):\n"
             for i, p in enumerate(products, 1):
                 produtos_apresentados += f"Modelo {i}: {p.get('nome_modelo')} | Preço: {p.get('preco_desconto', p.get('preco'))} | Link: {p.get('link_produto')}\n"
                 
-            objetivos_extras = """
-            ATENÇÃO PARA FLUXO DE COMPRA:
-            Se o cliente demonstrar que escolheu um dos modelos apresentados ou confirmou a única opção disponível (ex: 'sim', 'quero esse mesmo', 'isso', 'quero o modelo 2', 'pode ser'), SUA MISSÃO FINAL É:
-            - Diga: "Que ótimo! Você pode concluir a compra através do link abaixo: [Comprar Pneu Agora](Link da URL) Se precisar de mais alguma coisa, estou à disposição!"
-            - O Link OBRIGATORIAMENTE DEVE estar no formato correto Markdown com a URL correspondente buscada da memória.
-            """
-            
+            if is_final_confirmation:
+                link = products[current_chosen_idx].get('link_produto', '') if current_chosen_idx >= 0 and current_chosen_idx < len(products) else ""
+                objetivos_extras = f"""
+                ATENÇÃO PARA FLUXO DE COMPRA:
+                O cliente ACABOU DE CONFIRMAR a compra do modelo selecionado.
+                SUA MISSÃO FINAL É:
+                - Diga algo como: "Que ótimo! Você pode concluir a compra de forma 100% segura e rápida através do link abaixo:\n\n[Comprar Pneu Agora]({link})\n\nSe precisar de mais alguma coisa, estou à disposição!"
+                - O Link OBRIGATORIAMENTE DEVE estar no formato correto Markdown.
+                - NÃO faça mais perguntas. Apenas entregue o link de checkout.
+                """
+            elif just_chose_now:
+                objetivos_extras = """
+                ATENÇÃO: O cliente acabou de escolher um modelo de pneu.
+                O SUA RESPOSTA EM TEXTO SERÁ USADA COMO A LEGENDA ÚNICA DA FOTO do pneu escolhido (ou seja, apenas uma mensagem vai ser enviada).
+                Você deve confirmar a escolha e pedir que ele valide a imagem antes de gerar o link.
+                Exemplo: "Ótima escolha! Esse modelo aqui da foto, certo? Posso enviar o link de pagamento? 😊"
+                NÃO ENVIE O LINK DE COMPRA AINDA.
+                """
+            else:
+                objetivos_extras = "ATENÇÃO: O cliente ainda não tomou a decisão final de compra. Esclareça dúvidas, compare opções se necessário, e direcione a escolha."
+
         contexto_recomendacao = f"Atenção: Você JÁ apresentou opções de pneus para o cliente em mensagens passadas. {objetivos_extras}"
-        objetivos_finais = "Esclareça as dúvidas de orçamento/produtos. E OBRIGATORIAMENTE DE FORMAS CLARA E AMIGÁVEL: Se o cliente já escolheu e confirmou um produto, envie o link de compra dele."
+        objetivos_finais = "Esclareça as dúvidas de orçamento/produtos e mantenha o tom amigável."
+        
+        # Fazer screenshot do produto escolhido APENAS se houver mais de 1 produto (Fluxo 2) e acabou de escolher
+        if just_chose_now and current_chosen_idx >= 0 and current_chosen_idx < len(products):
+            chosen_product = products[current_chosen_idx]
+            link = chosen_product.get("link_produto", "")
+            if len(products) > 1 and link and "hcpneus.com.br" in link:
+                # Usa a search_url para manter a sessão correta (veículo persistido por cookie/sessão) e clica via scraper
+                search_url = link
+                if isinstance(results_dict, dict) and results_dict.get("search_url"):
+                    search_url = results_dict.get("search_url")
+                
+                print(f"Fluxo 2: Cliente escolheu modelo {current_chosen_idx + 1}. Abrindo search_url: {search_url} para foto de: {chosen_product.get('data_name')}")
+                screenshot_path = screenshot_produto(search_url, chosen_product.get("data_name"))
+                if screenshot_path:
+                    if not state.get("pending_images"):
+                        state["pending_images"] = []
+                    state["pending_images"].append({
+                        "path": screenshot_path,
+                        "caption": ""  # Vazio para herdar do AI text
+                    })
     else:
         contexto_recomendacao = "Cenário: O cliente está apenas conversando ou tirando dúvidas iniciais, sem focar ativamente na cotação de pneus."
         objetivos_finais = "Termine SEMPRE com um leve incentivo perguntando se ele gostaria de pesquisar pneus."
@@ -385,6 +501,24 @@ def recommend_tires(state: AgentState):
             - Não liste como "Modelo 1".
             - NÃO ENVIE O LINK DE COMPRA NESSA RESPOSTA.
             """
+            
+            # === FLUXO 1: Produto único - Usar screenshot já capturado pelo scraper ===
+            screenshot_path = products[0].get("screenshot_path")
+            if not screenshot_path:
+                # Fallback: tentar capturar se o scraper não conseguiu
+                link = products[0].get("link_produto", "")
+                if link and "hcpneus.com.br" in link:
+                    print(f"Fluxo 1: Screenshot não veio do scraper. Tentando captura avulsa: {link}")
+                    screenshot_path = screenshot_produto(link, products[0].get("data_name"))
+            
+            if screenshot_path:
+                print(f"Fluxo 1: Screenshot disponível: {screenshot_path}")
+                if not state.get("pending_images"):
+                    state["pending_images"] = []
+                state["pending_images"].append({
+                    "path": screenshot_path,
+                    "caption": ""
+                })
         else:
             sys_prompt = f"""
             Você é um vendedor especialista e objetivo da HC Pneus.
@@ -454,9 +588,36 @@ def process_message(user_message: str, current_state: dict):
             "catalog_results": {},
             "recommendation_given": False,
             "dados_confirmados": False,
+            "pending_images": [],
+            "produto_escolhido_idx": -1,
         }
+
+    # Limpar imagens pendentes de rodadas anteriores
+    current_state["pending_images"] = []
 
     current_state["messages"].append(HumanMessage(content=user_message))
     new_state = agent_executor.invoke(current_state)
-    ai_response = new_state["messages"][-1].content
-    return ai_response, new_state
+    ai_text = new_state["messages"][-1].content
+
+    # Montar lista de mensagens de retorno
+    response_messages = []
+
+    # Adicionar imagens pendentes primeiro
+    for img in new_state.get("pending_images", []):
+        caption = img.get("caption", "")
+        # Se a imagem tiver caption vazio, usamos o texto do agente como caption
+        if not caption and ai_text:
+            caption = ai_text
+            ai_text = ""  # Limpa para não enviar mensagem de texto duplicada
+            
+        response_messages.append({
+            "type": "image",
+            "path": img["path"],
+            "caption": caption
+        })
+
+    # Texto por último (se ainda sobrar texto)
+    if ai_text:
+        response_messages.append({"type": "text", "content": ai_text})
+
+    return response_messages, new_state

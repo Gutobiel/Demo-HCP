@@ -1,12 +1,12 @@
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import re
-import math
 import time
+import os
+import uuid
 
 def parse_price(price_str):
     """Auxiliary function to clean price string"""
@@ -23,6 +23,7 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
     url = "https://www.hcpneus.com.br/"
     
     chrome_options = Options()
+    chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--window-size=1280,800")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -31,14 +32,15 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
     try:
         print(f"Iniciando navegador Chrome para buscar: {car_brand} {car_model} {car_year} {car_version}...")
         driver = webdriver.Chrome(options=chrome_options)
-        driver.set_page_load_timeout(20)
+        driver.set_page_load_timeout(60)
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
         try:
             driver.get(url)
         except Exception as e:
             print("Timeout ou erro ao carregar página inicial, tentando prosseguir assim mesmo...", e)
-            
+        
+        time.sleep(3)  # Aguardar JS do site inicializar os dropdowns
         wait = WebDriverWait(driver, 30)
         
         # Helper pra clicar robustamente
@@ -197,14 +199,41 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
                 live_results.append({
                     "marca": marca,
                     "nome_modelo": nome,
+                    "data_name": nome,
                     "preco_original": preco_original,
                     "preco_desconto": preco_desconto,
                     "condicao": condicao,
                     "preco": preco_desconto, # Fallback
-                    "link_produto": driver.current_url
+                    "link_produto": driver.current_url,
+                    "screenshot_path": None  # Vai ser preenchido caso seja único aqui mesmo no scraper, ou pelo screenshot_produto depois
                 })
+                
+                # Capturar screenshot inline
+                try:
+                    try:
+                        cookie_btn = WebDriverWait(driver, 3).until(
+                            EC.element_to_be_clickable((By.XPATH, "/html/body/section/footer/div[1]/div/div/button"))
+                        )
+                        cookie_btn.click()
+                        time.sleep(1)
+                    except:
+                        pass
+                    
+                    head_element = driver.find_element(By.CSS_SELECTOR, "div.head")
+                    time.sleep(2)
+                    
+                    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                    screenshot_dir = os.path.join(base_dir, "media", "screenshots")
+                    os.makedirs(screenshot_dir, exist_ok=True)
+                    filename = f"produto_{uuid.uuid4().hex[:8]}.png"
+                    filepath = os.path.join(screenshot_dir, filename)
+                    
+                    head_element.screenshot(filepath)
+                    live_results[-1]["screenshot_path"] = filepath
+                    print(f"Screenshot capturado dentro do scraper: {filepath}")
+                except Exception as ss_err:
+                    print(f"Não foi possível capturar screenshot inline: {ss_err}")
             else:
-                # Vamos buscar por seletores comuns de produtos na listagem
                 product_selectors = [
                      ".wd-browsing-grid-list .product-item",
                      ".wd-browsing-grid-list li",
@@ -226,7 +255,6 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
                     text_content = item.text.strip()
                     if not text_content: continue
                     
-                    # Extração segura do Nome do produto
                     nome = None
                     try:
                         nome = item.get_attribute("data-name")
@@ -247,29 +275,24 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
                             linhas = [l.strip() for l in text_content.split('\n') if l.strip()]
                             nome = linhas[0] if linhas else None
 
-                    # Extração do Preço Original (De)
                     try:
                         preco_original = item.find_element(By.CSS_SELECTOR, ".list-price span, .old-price .price, [data-price-type='oldPrice'] .price").text.strip()
                     except:
                         preco_original = "N/A"
                         
-                    # Extração do Preço de Desconto (Por)
                     try:
                         preco_desconto = item.find_element(By.CSS_SELECTOR, ".instant-price, .special-price .price, [data-price-type='finalPrice'] .price").text.strip()
                     except:
                         try:
-                            # Se não tem antigo/novo, tenta pegar apenas o preço normal
                             preco_desconto = item.find_element(By.CSS_SELECTOR, ".price").text.strip()
                         except:
                             preco_desconto = "N/A"
                             
-                    # Extração da condição de pagamento
                     try:
                         condicao = item.find_element(By.CSS_SELECTOR, ".condition").text.strip()
                     except:
                         condicao = ""
                             
-                    # Se não foi possível encontrar nome e preço pelos seletores, tenta extrair por texto
                     if not nome or preco_desconto == "N/A":
                         continue
                         
@@ -277,15 +300,45 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
                     if 'pneu' not in nome_str and 'pneu' not in text_content.lower():
                         continue
                         
+                    # Filtra RIGOROSAMENTE pelo aro para não dessincronizar o index com o LLM (que esconde os errados)
+                    aro_match = re.search(r'\d+', str(rim_size))
+                    if aro_match:
+                        a_v = aro_match.group(0)
+                        if f"r{a_v}" not in nome_str and f"aro {a_v}" not in nome_str and f"aro{a_v}" not in nome_str:
+                            continue
+                        
+                    # Novo método MEGA ROBUSTO para extrair link:
+                    link_produto = None
                     try:
-                        link_produto = item.find_element(By.TAG_NAME, "a").get_attribute("href")
+                        try:
+                            link_el = item.find_element(By.CSS_SELECTOR, "a.product-item-link")
+                        except:
+                            link_el = item.find_element(By.CSS_SELECTOR, "a.product-image")
+                        href = link_el.get_attribute("href")
+                        if href and "javascript" not in href and "-p" in href:
+                            link_produto = href
                     except:
+                        pass
+                        
+                    if not link_produto:
+                        try:
+                            links = item.find_elements(By.TAG_NAME, "a")
+                            for a in links:
+                                href = a.get_attribute("href")
+                                if href and "-p" in href and "hcpneus" in href:
+                                    link_produto = href
+                                    break
+                        except:
+                            pass
+                            
+                    if not link_produto:
                         link_produto = driver.current_url
 
                     marca = nome.split()[0] if nome else car_brand
                     live_results.append({
                         "marca": marca,
                         "nome_modelo": nome,
+                        "data_name": nome,
                         "preco_original": preco_original,
                         "preco_desconto": preco_desconto,
                         "condicao": condicao,
@@ -293,16 +346,17 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
                         "link_produto": link_produto
                     })
                     
-                    if len(live_results) >= 10: # Retorna os top 10 resultados
+                    if len(live_results) >= 10:
                         break
         except Exception as sel_err:
             print(f"Erro ao extrair dados dos produtos: {sel_err}")
 
+        search_url = driver.current_url
         driver.quit()
 
         if live_results or total_resultados:
             print(f"Produtos extraídos do site real! Total encontrado: {total_resultados}")
-            return {"count": total_resultados, "products": live_results}
+            return {"count": total_resultados, "products": live_results, "search_url": search_url}
 
     except Exception as e:
         print(f"Erro no fluxo Selenium: {e}")
@@ -311,17 +365,10 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
         except:
             pass
             
-    # Fallback to mock data if scrape fails
     print("Selenium falhou. Usando banco virtual de contingência (Mock).")
     mock_database = {
         "14": [
             {"marca": "Goodyear", "nome_modelo": "Pneu Goodyear 175/70R14 Direction Touring 2", "preco": "R$ 389,00", "link_produto": "https://www.hcpneus.com.br/", "condicao": "6x de R$ 64,83 sem juros"},
-        ],
-        "15": [
-            {"marca": "Michelin", "nome_modelo": "Pneu Michelin 195/65R15 Energy XM2+", "preco": "R$ 519,90", "link_produto": "https://www.hcpneus.com.br/", "condicao": "6x de R$ 86,65 sem juros"},
-        ],
-        "16": [
-            {"marca": "Michelin", "nome_modelo": "Pneu Michelin 205/55R16 Primacy 4+", "preco": "R$ 629,00", "link_produto": "https://www.hcpneus.com.br/", "condicao": "6x de R$ 104,83 sem juros"},
         ]
     }
     
@@ -331,8 +378,3 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
         {"marca": car_brand, "nome_modelo": f"Pneu Premium {car_brand} {car_model} Aro {an}", "preco": "Sob consulta", "link_produto": "https://www.hcpneus.com.br/", "condicao": ""}
     ])
     return {"count": len(mock_res), "products": mock_res}
-
-if __name__ == "__main__":
-    produtos = buscar_pneus_no_site("Toyota", "Corolla", "2018", "XEI", "16")
-    for p in produtos:
-        print(p)

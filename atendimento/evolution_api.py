@@ -5,6 +5,7 @@ Gerencia instâncias WhatsApp, envio de mensagens e configuração de webhooks.
 """
 
 import os
+import base64
 import requests
 import logging
 
@@ -97,6 +98,71 @@ def send_text(number, text, instance_name=None):
     except requests.exceptions.RequestException as e:
         logger.error(f"Erro ao enviar mensagem para {number}: {e}")
         return {"success": False, "error": str(e)}
+
+
+def send_image(number, image_path, caption="", instance_name=None):
+    """
+    Envia uma imagem via WhatsApp a partir de um arquivo local.
+    ZDG: multipart form-data (upload de arquivo direto).
+    Evolution Local: base64 no JSON.
+    """
+    name = instance_name or EVOLUTION_INSTANCE_NAME
+
+    if "zdg.com.br" in EVOLUTION_API_URL:
+        # ZDG usa multipart form-data com upload de arquivo
+        url = EVOLUTION_API_URL
+        
+        try:
+            with open(image_path, "rb") as f:
+                files = {
+                    "media": ("produto.png", f, "image/png")
+                }
+                data = {
+                    "number": number,
+                    "body": caption if caption else "📸",
+                    "externalKey": "bot_image",
+                    "isClosed": "false"
+                }
+                # Para multipart, não enviar Content-Type no header (requests seta automaticamente)
+                headers = {
+                    "Authorization": f"Bearer {EVOLUTION_API_KEY}"
+                }
+                resp = requests.post(url, files=files, data=data, headers=headers, timeout=30)
+                print(f"ZDG send_image response: status={resp.status_code}, body={resp.text[:500]}")
+                resp.raise_for_status()
+                result = resp.json()
+                logger.info(f"Imagem enviada para {number} via ZDG")
+                return {"success": True, "data": result}
+        except Exception as e:
+            logger.error(f"Erro ao enviar imagem para {number} via ZDG: {e}")
+            return {"success": False, "error": str(e)}
+    else:
+        # Evolution API local usa base64 no JSON
+        try:
+            with open(image_path, "rb") as f:
+                image_data = base64.b64encode(f.read()).decode("utf-8")
+        except Exception as e:
+            logger.error(f"Erro ao ler arquivo de imagem {image_path}: {e}")
+            return {"success": False, "error": str(e)}
+
+        url = f"{EVOLUTION_API_URL}/message/sendMedia/{name}"
+        payload = {
+            "number": number,
+            "mediatype": "image",
+            "caption": caption,
+            "media": f"data:image/png;base64,{image_data}",
+            "fileName": "produto.png"
+        }
+
+        try:
+            resp = requests.post(url, json=payload, headers=_headers(), timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            logger.info(f"Imagem enviada para {number}")
+            return {"success": True, "data": data}
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Erro ao enviar imagem para {number}: {e}")
+            return {"success": False, "error": str(e)}
 
 
 def set_webhook(webhook_url, instance_name=None):
