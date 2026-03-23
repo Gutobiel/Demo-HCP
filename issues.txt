@@ -1,0 +1,13 @@
+Ao fim do fluxo o agente deve apagar da memoria os campos recebidos das conversa, ou se demonstrar interesse em ver opção para outro carro apagar tmb, ou caso passe o limite de tempo da conversa que será definido.
+
+
+CONFIRMOU PRODUTO?
+
+QUAL SERA A FORMA DE PAGAMENTO?
+1. PIX.
+	PROSSEGUIR ATENDIMENTO NO WHATSAPP
+	PRECISAREI DE MAIS ALGUMAS INFORMAÇÕES PARA CONTINUAR, PODE ME INFORMAR SE VOCÊ JA COMPROU CONOSCO PELO SITE OU POSSUI CONTA?
+
+2. CARTÃO, OUTROS.
+	MANDAR LINK DO PRODUTO NO SITE
+

@@ -23,7 +23,7 @@ def screenshot_produto(link_produto, data_name=None):
         return None
 
     chrome_options = Options()
-    chrome_options.add_argument("--headless=new")
+    # chrome_options.add_argument("--headless=new")  # Removido para abrir a aba visível
     chrome_options.add_argument("--window-size=1280,900")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.page_load_strategy = 'eager'  # Não esperar TUDO carregar
