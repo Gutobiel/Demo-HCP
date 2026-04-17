@@ -1233,7 +1233,7 @@ def process_pix_payment(state: AgentState):
     else:
         msg_erro = (
             "❌ Ops! Ocorreu um erro ao processar seu pedido. "
-            "Por favor, tente novamente em alguns instantes ou entre em contato com nossa equipe pelo telefone (61) 3262-2100. 📞"
+            "Por favor, tente novamente em alguns instantes ou entre em contato com nossa equipe pelo telefone (61) 4042-7360. 📞"
         )
         state["messages"].append(AIMessage(content=msg_erro))
     
