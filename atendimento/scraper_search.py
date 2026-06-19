@@ -237,31 +237,8 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
                     "screenshot_path": None  # Vai ser preenchido caso seja único aqui mesmo no scraper, ou pelo screenshot_produto depois
                 })
                 
-                # Capturar screenshot inline
-                try:
-                    try:
-                        cookie_btn = WebDriverWait(driver, 3).until(
-                            EC.element_to_be_clickable((By.XPATH, "/html/body/section/footer/div[1]/div/div/button"))
-                        )
-                        cookie_btn.click()
-                        time.sleep(1)
-                    except:
-                        pass
-                    
-                    head_element = driver.find_element(By.CSS_SELECTOR, "div.head")
-                    time.sleep(2)
-                    
-                    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                    screenshot_dir = os.path.join(base_dir, "media", "screenshots")
-                    os.makedirs(screenshot_dir, exist_ok=True)
-                    filename = f"produto_{uuid.uuid4().hex[:8]}.png"
-                    filepath = os.path.join(screenshot_dir, filename)
-                    
-                    head_element.screenshot(filepath)
-                    live_results[-1]["screenshot_path"] = filepath
-                    print(f"Screenshot capturado dentro do scraper: {filepath}")
-                except Exception as ss_err:
-                    print(f"Não foi possível capturar screenshot inline: {ss_err}")
+                # Deixar que o screenshot_produto faça a captura com imagens habilitadas e logs do console
+                pass
             else:
                 product_selectors = [
                      ".wd-browsing-grid-list .product-item",
