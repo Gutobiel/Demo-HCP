@@ -29,13 +29,13 @@ def screenshot_produto(link_produto, data_name=None):
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--disable-software-rasterizer")
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("--disable-setuid-sandbox")
         chrome_options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
     chrome_options.add_argument("--window-size=1280,900")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.page_load_strategy = 'eager'  # Não esperar TUDO carregar
+    chrome_options.set_capability('goog:loggingPrefs', {'browser': 'ALL'})
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
 
@@ -137,6 +137,16 @@ def screenshot_produto(link_produto, data_name=None):
         except Exception as e_hide:
             print(f"[Screenshot] Erro ao ocultar overlays: {e_hide}")
 
+        # Obter logs do console antes de fechar o driver
+        try:
+            browser_logs = driver.get_log('browser')
+            print("\n========== [Screenshot] CHROME CONSOLE LOGS ==========")
+            for entry in browser_logs:
+                print(f"[Chrome Console] {entry.get('level')}: {entry.get('message')}")
+            print("======================================================\n")
+        except Exception as log_err:
+            print(f"[Screenshot] Erro ao capturar logs do console: {log_err}")
+
         # Screenshot apenas do elemento .head
         head_element.screenshot(filepath)
         print(f"Screenshot do produto salvo em: {filepath}")
@@ -144,6 +154,15 @@ def screenshot_produto(link_produto, data_name=None):
 
     except Exception as e:
         print(f"Erro ao fazer screenshot do produto: {e}")
+        try:
+            if driver:
+                browser_logs = driver.get_log('browser')
+                print("\n========== [Screenshot Error] CHROME CONSOLE LOGS ==========")
+                for entry in browser_logs:
+                    print(f"[Chrome Console] {entry.get('level')}: {entry.get('message')}")
+                print("============================================================\n")
+        except:
+            pass
         return None
     finally:
         if driver:
