@@ -91,11 +91,22 @@ def screenshot_produto(link_produto, data_name=None):
         # Localizar a seção .head que contém imagem + descrição + preço
         head_element = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.head")))
 
-        # Esperar a imagem principal carregar
+        # Esperar a imagem principal carregar completamente (checar se foi baixada e renderizada)
         try:
-            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.head img.image")))
-            time.sleep(2)  # Aguardar renderização completa
-        except:
+            img_el = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.head img.image")))
+            start_time = time.time()
+            while time.time() - start_time < 8:
+                is_loaded = driver.execute_script(
+                    "return arguments[0].complete && typeof arguments[0].naturalWidth != 'undefined' && arguments[0].naturalWidth > 0", 
+                    img_el
+                )
+                if is_loaded:
+                    print("[Screenshot] Imagem principal carregada com sucesso!")
+                    break
+                time.sleep(0.5)
+            time.sleep(1)  # Pequena folga para garantir renderização de outros componentes
+        except Exception as img_err:
+            print(f"[Screenshot] Erro ao aguardar carregamento da imagem: {img_err}")
             time.sleep(3)
 
         # Salvar na pasta media/screenshots/ do projeto Django
