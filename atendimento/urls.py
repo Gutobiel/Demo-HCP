@@ -11,5 +11,6 @@ urlpatterns = [
     path("api/whatsapp/setup/", views.setup_instance, name="whatsapp_setup"),
     path("api/whatsapp/qrcode/", views.get_qrcode_view, name="whatsapp_qrcode"),
     path("api/test-image/", views.test_image, name="test_image"),
+    path("api/chrome-logs/", views.view_chrome_logs, name="chrome_logs"),
 ]
 

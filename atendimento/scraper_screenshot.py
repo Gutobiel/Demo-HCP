@@ -144,6 +144,17 @@ def screenshot_produto(link_produto, data_name=None):
             for entry in browser_logs:
                 print(f"[Chrome Console] {entry.get('level')}: {entry.get('message')}")
             print("======================================================\n")
+
+            # Salvar logs em arquivo
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            log_filepath = os.path.join(base_dir, "chrome_console.log")
+            with open(log_filepath, "a", encoding="utf-8") as log_file:
+                log_file.write(f"\n--- SUCCESS SCRAPING LOG FOR {link_produto} ({time.strftime('%Y-%m-%d %H:%M:%S')}) ---\n")
+                if browser_logs:
+                    for entry in browser_logs:
+                        log_file.write(f"[{entry.get('level')}] {entry.get('message')}\n")
+                else:
+                    log_file.write("No console logs retrieved.\n")
         except Exception as log_err:
             print(f"[Screenshot] Erro ao capturar logs do console: {log_err}")
 
@@ -155,14 +166,20 @@ def screenshot_produto(link_produto, data_name=None):
     except Exception as e:
         print(f"Erro ao fazer screenshot do produto: {e}")
         try:
-            if driver:
-                browser_logs = driver.get_log('browser')
-                print("\n========== [Screenshot Error] CHROME CONSOLE LOGS ==========")
-                for entry in browser_logs:
-                    print(f"[Chrome Console] {entry.get('level')}: {entry.get('message')}")
-                print("============================================================\n")
-        except:
-            pass
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            log_filepath = os.path.join(base_dir, "chrome_console.log")
+            with open(log_filepath, "a", encoding="utf-8") as log_file:
+                log_file.write(f"\n--- ERROR SCRAPING LOG FOR {link_produto} ({time.strftime('%Y-%m-%d %H:%M:%S')}) ---\n")
+                log_file.write(f"Error: {e}\n")
+                if driver:
+                    try:
+                        browser_logs = driver.get_log('browser')
+                        for entry in browser_logs:
+                            log_file.write(f"[{entry.get('level')}] {entry.get('message')}\n")
+                    except Exception as dev_err:
+                        log_file.write(f"Failed to get browser logs: {dev_err}\n")
+        except Exception as e_log:
+            print(f"[Screenshot] Erro ao gravar logs de erro em arquivo: {e_log}")
         return None
     finally:
         if driver:
