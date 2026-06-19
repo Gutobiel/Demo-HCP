@@ -201,7 +201,17 @@ def view_chrome_logs(request):
         try:
             with open(log_filepath, "r", encoding="utf-8") as f:
                 content = f.read()
-            return HttpResponse(content, content_type="text/plain; charset=utf-8")
+            if content.strip():
+                return HttpResponse(content, content_type="text/plain; charset=utf-8")
         except Exception as e:
             return HttpResponse(f"Erro ao ler arquivo de logs: {e}", content_type="text/plain; charset=utf-8")
-    return HttpResponse("Arquivo 'chrome_console.log' nao encontrado ou esta vazio.", content_type="text/plain; charset=utf-8")
+    
+    # Mensagem de ajuda caso o arquivo nao exista ou esteja vazio
+    return HttpResponse(
+        "Arquivo 'chrome_console.log' nao encontrado ou esta vazio.\n\n"
+        "Como funciona:\n"
+        "1. O arquivo de logs e criado ou atualizado no momento em que o bot faz o scraper do produto para tirar um screenshot.\n"
+        "2. Envie uma mensagem pedindo um pneu no chat (Ex: 'Quero pneu Goodyear aro 14') para acionar o scraper do produto.\n"
+        "3. Em seguida, atualize esta pagina para ver os logs detalhados do Chrome headless.\n",
+        content_type="text/plain; charset=utf-8"
+    )
