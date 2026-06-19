@@ -27,6 +27,16 @@ def finalizar_compra_pix(link_produto, possui_cadastro, dados_checkout, endereco
         dict com codigo_pix, qr_code_path, numero_pedido, total_compra, senha_gerada
         ou None em caso de erro
     """
+    if os.getenv("DISABLE_SELENIUM_SCRAPER", "False").lower() == "true":
+        print("Scraper do Selenium desativado via ENV. Retornando pagamento Mock.")
+        return {
+            "codigo_pix": "00020126580014br.gov.bcb.pix0136demo-pix-key-hcpneus-123456789012345678905204000053039865406389.005802BR5915HC PNEUS LIMITA6009SAO PAULO62070503***6304abcd",
+            "qr_code_path": None,
+            "numero_pedido": f"HC-{uuid.uuid4().hex[:6].upper()}",
+            "total_compra": "R$ 389,00",
+            "senha_gerada": "HCpneus2024!"
+        }
+
     if not link_produto or "hcpneus.com.br" not in link_produto:
         print("Erro: Link do produto inválido.")
         return None
@@ -38,6 +48,9 @@ def finalizar_compra_pix(link_produto, possui_cadastro, dados_checkout, endereco
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--disable-software-rasterizer")
+        chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("--disable-setuid-sandbox")
     chrome_options.add_argument("--window-size=1280,900")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.page_load_strategy = 'eager'
@@ -50,7 +63,7 @@ def finalizar_compra_pix(link_produto, possui_cadastro, dados_checkout, endereco
 
     try:
         driver = webdriver.Chrome(options=chrome_options)
-        driver.set_page_load_timeout(60)
+        driver.set_page_load_timeout(30)
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
         wait = WebDriverWait(driver, 20)

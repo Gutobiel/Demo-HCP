@@ -19,6 +19,26 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
     Usa Selenium para abrir um navegador Chrome real, acessar o site da HC Pneus
     preencher o formulário de veículo (Marca, Modelo, Ano, Versão) e extrair os produtos reais.
     """
+    if os.getenv("DISABLE_SELENIUM_SCRAPER", "False").lower() == "true":
+        print("Scraper do Selenium desativado via ENV. Usando banco virtual de contingência (Mock).")
+        mock_database = {
+            "13": [
+                {"marca": "Pirelli", "nome_modelo": "Pneu Pirelli 165/70R13 Formula Evo", "preco": "R$ 299,00", "link_produto": "https://www.hcpneus.com.br/", "condicao": "6x de R$ 49,83 sem juros"},
+            ],
+            "14": [
+                {"marca": "Goodyear", "nome_modelo": "Pneu Goodyear 175/70R14 Direction Touring 2", "preco": "R$ 389,00", "link_produto": "https://www.hcpneus.com.br/", "condicao": "6x de R$ 64,83 sem juros"},
+            ],
+            "15": [
+                {"marca": "Bridgestone", "nome_modelo": "Pneu Bridgestone 185/60R15 Ecopia EP150", "preco": "R$ 449,00", "link_produto": "https://www.hcpneus.com.br/", "condicao": "6x de R$ 74,83 sem juros"},
+            ]
+        }
+        aro_match_mock = re.search(r'\d+', str(rim_size))
+        an = aro_match_mock.group(0) if aro_match_mock else "14"
+        mock_res = mock_database.get(an, [
+            {"marca": car_brand, "nome_modelo": f"Pneu Premium {car_brand} {car_model} Aro {an}", "preco": "Sob consulta", "link_produto": "https://www.hcpneus.com.br/", "condicao": ""}
+        ])
+        return {"count": len(mock_res), "products": mock_res}
+
     # URL da Home onde tem o formulário
     url = "https://www.hcpneus.com.br/"
     
@@ -29,6 +49,10 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--disable-software-rasterizer")
+        chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("--disable-setuid-sandbox")
+        chrome_options.add_experimental_option("prefs", {"profile.managed_default_content_settings.images": 2})
     chrome_options.add_argument("--window-size=1280,800")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -37,7 +61,7 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
     try:
         print(f"Iniciando navegador Chrome para buscar: {car_brand} {car_model} {car_year} {car_version}...")
         driver = webdriver.Chrome(options=chrome_options)
-        driver.set_page_load_timeout(60)
+        driver.set_page_load_timeout(30)
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
         try:
@@ -45,7 +69,7 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
         except Exception as e:
             print("Timeout ou erro ao carregar página inicial, tentando prosseguir assim mesmo...", e)
         
-        time.sleep(3)  # Aguardar JS do site inicializar os dropdowns
+        time.sleep(1.5)  # Aguardar JS do site inicializar os dropdowns
         wait = WebDriverWait(driver, 30)
         
         # Helper pra clicar robustamente
@@ -58,7 +82,7 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
         # 1. Clicar na aba "Pesquisa por Veículo"
         aba_veiculo = wait.until(EC.presence_of_element_located((By.XPATH, "//a[contains(., 'Veículo')]")))
         click_element(aba_veiculo)
-        time.sleep(2) # wait for animation
+        time.sleep(0.5) # wait for animation
         
         # Helper pra selecionar dropdown por texto aproximado/parcial
         def select_dropdown(xpath, value_text):
@@ -113,12 +137,12 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
                     print(f"Melhor opção para '{value_text}' foi '{txt}' (Score: {best_score}). Selecionando...")
                     try:
                         click_element(best_opt)
-                        time.sleep(2) # Wait for AJAX dependency
+                        time.sleep(0.5) # Wait for AJAX dependency
                         return True
                     except Exception as click_err:
                         val = best_opt.get_attribute('value')
                         driver.execute_script(f"arguments[0].value = '{val}'; arguments[0].dispatchEvent(new Event('change'));", select_el)
-                        time.sleep(2)
+                        time.sleep(0.5)
                         return True
                 
                 if valid_options:
@@ -127,12 +151,12 @@ def buscar_pneus_no_site(car_brand, car_model, car_year, car_version, rim_size):
                     print(f"AVISO: '{value_text}' não encontrado. Forçando seleção na primeira válida: '{txt}'...")
                     try:
                         click_element(primeira_valida)
-                        time.sleep(2)
+                        time.sleep(0.5)
                         return True
                     except:
                         val = primeira_valida.get_attribute('value')
                         driver.execute_script(f"arguments[0].value = '{val}'; arguments[0].dispatchEvent(new Event('change'));", select_el)
-                        time.sleep(2)
+                        time.sleep(0.5)
                         return True
 
                 print(f"AVISO: '{value_text}' não encontrado e não há opções válidas.")
