@@ -91,15 +91,18 @@ def parse_intent_and_extract(state: AgentState):
     ])
     
     if all_filled and not state.get("dados_confirmados"):
-        conversa = _build_conversation_context(state, max_messages=4)
-        intencao = _llm_detect_intent(
-            user_msg, conversa,
-            opcoes='"confirmar" = o cliente confirma que os dados do veículo estão corretos\n"corrigir" = o cliente quer corrigir algum dado do veículo\n"outro" = não é possível determinar ou o cliente está falando sobre outra coisa',
-            contexto="O consultor mostrou os dados do veículo (marca, modelo, ano, versão, aro) e pediu confirmação ao cliente antes de buscar pneus."
-        )
-        if intencao == "confirmar":
-            state["dados_confirmados"] = True
-            return state
+        # Só considerar intenção de confirmação se o agente de fato já enviou a mensagem de confirmação de especificações
+        ai_msgs = [m for m in state.get("messages", []) if isinstance(m, AIMessage)]
+        if ai_msgs and "Só para confirmar" in ai_msgs[-1].content:
+            conversa = _build_conversation_context(state, max_messages=4)
+            intencao = _llm_detect_intent(
+                user_msg, conversa,
+                opcoes='"confirmar" = o cliente confirma que os dados do veículo estão corretos\n"corrigir" = o cliente quer corrigir algum dado do veículo\n"outro" = não é possível determinar ou o cliente está falando sobre outra coisa',
+                contexto="O consultor mostrou os dados do veículo (marca, modelo, ano, versão, aro) e pediu confirmação ao cliente antes de buscar pneus."
+            )
+            if intencao == "confirmar":
+                state["dados_confirmados"] = True
+                return state
 
     # Montar contexto da conversa para o LLM entender respostas curtas como "14" ou "2015"
     conversa_recente = _build_conversation_context(state, max_messages=6)
@@ -585,13 +588,15 @@ def recommend_tires(state: AgentState):
 
         if len(products) == 1:
             sys_prompt = f"""
-            Você é um vendedor especialista da HC Pneus.
+            Você é um vendedor especialista e objetivo da HC Pneus.
             O cliente possui um {car_modelo}.
             Você encontrou APENAS ESTA OPÇÃO de pneu no estoque:
             {products_text}
             
             Sua tarefa:
-            - Apresente a opção EXATAMENTE com este padrão de frase, sem floreios extras: "Encontrei este modelo disponível para o seu {car_modelo}: [DESCRIÇÃO DO PNEU E PREÇO]. É isso mesmo que você deseja?"
+            - Apresente a opção com simpatia e clareza, informando o modelo do pneu e o preço.
+            - Pergunte de forma explícita se é esse modelo que ele deseja confirmar para prosseguirmos para o pagamento.
+            - Exemplo de pergunta final obrigatória: "Deseja confirmar este modelo para prosseguirmos com o pagamento?"
             - Não informe que você "guardou os detalhes".
             - Não liste como "Modelo 1".
             - NÃO ENVIE O LINK DE COMPRA NESSA RESPOSTA.
@@ -630,7 +635,8 @@ def recommend_tires(state: AgentState):
             - NÃO ENVIE O LINK DE COMPRA AQUI. Apenas estimule o cliente a escolher um dos modelos primeiro.
             """
             
-        response = llm.invoke([SystemMessage(content=sys_prompt)])
+        user_msg = state["messages"][-1].content if state["messages"] else ""
+        response = llm.invoke([SystemMessage(content=sys_prompt), HumanMessage(content=user_msg)])
         msg = response.content
         state["recommendation_given"] = True
 

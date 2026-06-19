@@ -323,6 +323,18 @@
                     appendMessage("Desculpe, ocorreu um erro: " + data.error, 'agent');
                 }
 
+                if (data.images && data.images.length > 0) {
+                    data.images.forEach(img => {
+                        if (img.base64) {
+                            const imgHTML = `<div style="margin-top: 10px;">
+                                <img src="data:image/png;base64,${img.base64}" alt="Pneu" style="width: 100%; max-width: 320px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); display: block;" />
+                                ${img.caption ? `<p style="margin-top: 8px; font-size: 0.9rem; color: var(--text-color);">${img.caption.replace(/\n/g, '<br>')}</p>` : ''}
+                            </div>`;
+                            appendMessage(imgHTML, 'agent', true);
+                        }
+                    });
+                }
+
             } catch (err) {
                 typingIndicator.style.display = 'none';
                 appendMessage("Erro na conexão com o servidor.", 'agent');
