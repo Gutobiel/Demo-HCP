@@ -48,7 +48,6 @@ def finalizar_compra_pix(link_produto, possui_cadastro, dados_checkout, endereco
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--disable-software-rasterizer")
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("--disable-setuid-sandbox")
         chrome_options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")

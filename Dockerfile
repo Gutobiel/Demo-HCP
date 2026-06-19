@@ -11,6 +11,11 @@ RUN apt-get update && apt-get install -y \
     && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update && apt-get install -y \
     google-chrome-stable \
+    fonts-liberation \
+    libgbm1 \
+    libasound2 \
+    libnspr4 \
+    libnss3 \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
