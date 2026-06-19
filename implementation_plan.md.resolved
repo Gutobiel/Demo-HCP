@@ -1,0 +1,90 @@
+# Scraper de Pagamento PIX — Plano de Implementação
+
+## Objetivo
+Criar `scraper_pagamento.py` que automatiza todo o checkout no site HC Pneus após o cliente confirmar PIX como forma de pagamento. Integrar com [process_pix_payment](file:///c:/Users/gutob/OneDrive/Documentos/Demo_HCPneus/atendimento/agent.py#982-999) no [agent.py](file:///c:/Users/gutob/OneDrive/Documentos/Demo_HCPneus/atendimento/agent.py).
+
+## Fluxo Completo do Scraper
+
+```mermaid
+flowchart TD
+    A[Abrir link do produto] --> B[Fechar banner de cookies]
+    B --> C[Selecionar loja com maior estoque]
+    C --> D[Clicar 'Comprar']
+    D --> E[Clicar 'Finalizar compra']
+    E --> F{Tem cadastro?}
+    F -->|Sim| G[Inserir email + senha → Entrar]
+    F -->|Não| H[Clicar 'Cadastre-se agora']
+    H --> I[Preencher: Nome, CPF, Nascimento, Telefone, Sexo, Email, Senha gerada]
+    I --> J[Clicar 'Cadastrar']
+    G --> K[Fechar popup de endereço]
+    J --> K
+    K --> L[Clicar 'Continuar → Pagamento']
+    L --> M[Selecionar PIX]
+    M --> N[Clicar 'Finalizar compra']
+    N --> O[Extrair: código PIX, QR code, nº pedido, total]
+    O --> P[Retornar dados ao agent]
+```
+
+## Proposta de Mudanças
+
+---
+
+### Scraper
+
+#### [NEW] [scraper_pagamento.py](file:///c:/Users/gutob/OneDrive/Documentos/Demo_HCPneus/atendimento/scraper_pagamento.py)
+
+Função principal: `finalizar_compra_pix(link_produto, possui_cadastro, dados_checkout)`
+
+**Parâmetros:**
+- `link_produto` (str): URL do produto no HC Pneus
+- `possui_cadastro` (str): `"sim"` ou `"nao"`
+- `dados_checkout` (dict): Dados do cliente:
+  - Login: `{"email": "...", "senha": "..."}`
+  - Cadastro: `{"nome": "...", "cpf": "...", "nascimento": "...", "telefone": "...", "sexo": "...", "email": "..."}`
+
+**Retorno** (dict ou None):
+```python
+{
+    "codigo_pix": "00020126360014BR.GOV.BCB.PIX...",
+    "qr_code_path": "/media/screenshots/qr_xxxx.png",
+    "numero_pedido": "HC-335857-00001",
+    "total_compra": "R$ 732,93",
+    "senha_gerada": "HCpneus2024!"  # Só se novo cadastro
+}
+```
+
+**Etapas internas:**
+1. Abrir navegador (visível, sem headless) + produto
+2. Aceitar cookies
+3. Selecionar loja com maior estoque (`.stock-value`, comparar números)
+4. Clicar "Comprar" (`button.continue`)
+5. Clicar "Finalizar compra" (`button.bt-checkout`)
+6. Se login → preencher email/senha + clicar "Entrar"
+7. Se cadastro → clicar "Cadastre-se agora" + preencher todos os campos + gerar senha padrão + clicar "Cadastrar"
+8. Fechar popup endereço (`a.close`)
+9. Clicar "Continuar → Pagamento" (`a.go-payment`)
+10. Selecionar PIX (`a[href*="pix"]`)
+11. Clicar "Finalizar compra" (`#form-checkout-submit`)
+12. Extrair código PIX, QR code image, nº pedido, total
+13. Salvar QR code image localmente
+14. Retornar dict com todos os dados
+
+---
+
+### Agent
+
+#### [MODIFY] [agent.py](file:///c:/Users/gutob/OneDrive/Documentos/Demo_HCPneus/atendimento/agent.py)
+
+- Importar `finalizar_compra_pix` do novo scraper
+- Modificar [process_pix_payment](file:///c:/Users/gutob/OneDrive/Documentos/Demo_HCPneus/atendimento/agent.py#982-999): quando `pix_confirmado=True`, chamar o scraper, processar resultado, e enviar mensagem com código PIX, QR code e nº do pedido ao cliente
+- Adicionar campos ao [AgentState](file:///c:/Users/gutob/OneDrive/Documentos/Demo_HCPneus/atendimento/agent.py#12-38): `pix_codigo`, `pix_qr_path`, `pix_numero_pedido`, `pix_total`, `senha_gerada`
+- Enviar imagem do QR code via `pending_images`
+
+---
+
+## Verificação
+
+### Manual
+- Testar fluxo completo com cadastro existente (email + senha)
+- Testar fluxo completo com novo cadastro (todos os campos)
+- Verificar que o QR code e código PIX são enviados corretamente no WhatsApp

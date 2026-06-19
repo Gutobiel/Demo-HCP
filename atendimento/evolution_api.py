@@ -5,10 +5,37 @@ Gerencia instâncias WhatsApp, envio de mensagens e configuração de webhooks.
 """
 
 import os
+import re
+import base64
 import requests
 import logging
 
 logger = logging.getLogger(__name__)
+
+def format_message_for_whatsapp(text):
+    """Converte markdown padrão e tags HTML para formatação compatível com WhatsApp."""
+    if not text:
+        return text
+    
+    # 1. Converter tags HTML <s> e <strike> para tildes ~
+    text = re.sub(r'</?s>', '~', text)
+    text = re.sub(r'</?strike>', '~', text)
+    
+    # 2. Converter tags HTML <b> e <strong> para asterisco *
+    text = re.sub(r'</?b>', '*', text)
+    text = re.sub(r'</?strong>', '*', text)
+    
+    # 3. Converter tags HTML <i> e <em> para underscore _
+    text = re.sub(r'</?i>', '_', text)
+    text = re.sub(r'</?em>', '_', text)
+    
+    # 4. Converter negrito markdown de duplo asterisco ** para asterisco único *
+    text = text.replace('**', '*')
+    
+    # 5. Converter tachado markdown duplo ~~ para tilde única ~
+    text = text.replace('~~', '~')
+    
+    return text
 
 # Configurações obtidas do ambiente ou defaults
 EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "http://localhost:8080")
@@ -17,10 +44,16 @@ EVOLUTION_INSTANCE_NAME = os.getenv("EVOLUTION_INSTANCE_NAME", "hcpneus-bot")
 
 def _headers():
     """Retorna os headers padrão para as requisições."""
-    return {
-        "apikey": EVOLUTION_API_KEY,
+    headers = {
         "Content-Type": "application/json",
     }
+    if "zdg.com.br" in EVOLUTION_API_URL or "vossi-ia.com.br" in EVOLUTION_API_URL:
+        headers["Authorization"] = f"Bearer {EVOLUTION_API_KEY}"
+    elif EVOLUTION_API_KEY and EVOLUTION_API_KEY.startswith("ey"):
+        headers["Authorization"] = f"Bearer {EVOLUTION_API_KEY}"
+    else:
+        headers["apikey"] = EVOLUTION_API_KEY
+    return headers
 
 
 def create_instance(instance_name=None):
@@ -67,14 +100,23 @@ def get_qrcode(instance_name=None):
 def send_text(number, text, instance_name=None):
     """
     Envia uma mensagem de texto via WhatsApp.
-    POST /message/sendText/{instance}
     """
+    text = format_message_for_whatsapp(text)
     name = instance_name or EVOLUTION_INSTANCE_NAME
-    url = f"{EVOLUTION_API_URL}/message/sendText/{name}"
-    payload = {
-        "number": number,
-        "text": text,
-    }
+    if "zdg.com.br" in EVOLUTION_API_URL or "vossi-ia.com.br" in EVOLUTION_API_URL:
+        # ZDG API External Wrapper Abstract URL
+        url = EVOLUTION_API_URL
+        payload = {
+            "number": number,
+            "body": text,
+            "externalKey": "bot_reply"
+        }
+    else:
+        url = f"{EVOLUTION_API_URL}/message/sendText/{name}"
+        payload = {
+            "number": number,
+            "text": text,
+        }
 
     try:
         resp = requests.post(url, json=payload, headers=_headers(), timeout=15)
@@ -85,6 +127,72 @@ def send_text(number, text, instance_name=None):
     except requests.exceptions.RequestException as e:
         logger.error(f"Erro ao enviar mensagem para {number}: {e}")
         return {"success": False, "error": str(e)}
+
+
+def send_image(number, image_path, caption="", instance_name=None):
+    """
+    Envia uma imagem via WhatsApp a partir de um arquivo local.
+    ZDG: multipart form-data (upload de arquivo direto).
+    Evolution Local: base64 no JSON.
+    """
+    caption = format_message_for_whatsapp(caption)
+    name = instance_name or EVOLUTION_INSTANCE_NAME
+
+    if "zdg.com.br" in EVOLUTION_API_URL or "vossi-ia.com.br" in EVOLUTION_API_URL:
+        # ZDG usa multipart form-data com upload de arquivo
+        url = EVOLUTION_API_URL
+        
+        try:
+            with open(image_path, "rb") as f:
+                files = {
+                    "media": ("produto.png", f, "image/png")
+                }
+                data = {
+                    "number": number,
+                    "body": caption if caption else "📸",
+                    "externalKey": "bot_image",
+                    "isClosed": "false"
+                }
+                # Para multipart, não enviar Content-Type no header (requests seta automaticamente)
+                headers = {
+                    "Authorization": f"Bearer {EVOLUTION_API_KEY}"
+                }
+                resp = requests.post(url, files=files, data=data, headers=headers, timeout=30)
+                print(f"ZDG send_image response: status={resp.status_code}, body={resp.text[:500]}")
+                resp.raise_for_status()
+                result = resp.json()
+                logger.info(f"Imagem enviada para {number} via ZDG")
+                return {"success": True, "data": result}
+        except Exception as e:
+            logger.error(f"Erro ao enviar imagem para {number} via ZDG: {e}")
+            return {"success": False, "error": str(e)}
+    else:
+        # Evolution API local usa base64 no JSON
+        try:
+            with open(image_path, "rb") as f:
+                image_data = base64.b64encode(f.read()).decode("utf-8")
+        except Exception as e:
+            logger.error(f"Erro ao ler arquivo de imagem {image_path}: {e}")
+            return {"success": False, "error": str(e)}
+
+        url = f"{EVOLUTION_API_URL}/message/sendMedia/{name}"
+        payload = {
+            "number": number,
+            "mediatype": "image",
+            "caption": caption,
+            "media": f"data:image/png;base64,{image_data}",
+            "fileName": "produto.png"
+        }
+
+        try:
+            resp = requests.post(url, json=payload, headers=_headers(), timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            logger.info(f"Imagem enviada para {number}")
+            return {"success": True, "data": data}
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Erro ao enviar imagem para {number}: {e}")
+            return {"success": False, "error": str(e)}
 
 
 def set_webhook(webhook_url, instance_name=None):
