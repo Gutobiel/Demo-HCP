@@ -10,5 +10,6 @@ urlpatterns = [
     path("api/whatsapp/webhook/", views.whatsapp_webhook, name="whatsapp_webhook"),
     path("api/whatsapp/setup/", views.setup_instance, name="whatsapp_setup"),
     path("api/whatsapp/qrcode/", views.get_qrcode_view, name="whatsapp_qrcode"),
+    path("api/test-image/", views.test_image, name="test_image"),
 ]
 
