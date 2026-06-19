@@ -23,7 +23,12 @@ def screenshot_produto(link_produto, data_name=None):
         return None
 
     chrome_options = Options()
-    # chrome_options.add_argument("--headless=new")  # Removido para abrir a aba visível
+    import platform
+    if platform.system() == "Linux":
+        chrome_options.add_argument("--headless=new")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1280,900")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.page_load_strategy = 'eager'  # Não esperar TUDO carregar

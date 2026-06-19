@@ -5,11 +5,37 @@ Gerencia instâncias WhatsApp, envio de mensagens e configuração de webhooks.
 """
 
 import os
+import re
 import base64
 import requests
 import logging
 
 logger = logging.getLogger(__name__)
+
+def format_message_for_whatsapp(text):
+    """Converte markdown padrão e tags HTML para formatação compatível com WhatsApp."""
+    if not text:
+        return text
+    
+    # 1. Converter tags HTML <s> e <strike> para tildes ~
+    text = re.sub(r'</?s>', '~', text)
+    text = re.sub(r'</?strike>', '~', text)
+    
+    # 2. Converter tags HTML <b> e <strong> para asterisco *
+    text = re.sub(r'</?b>', '*', text)
+    text = re.sub(r'</?strong>', '*', text)
+    
+    # 3. Converter tags HTML <i> e <em> para underscore _
+    text = re.sub(r'</?i>', '_', text)
+    text = re.sub(r'</?em>', '_', text)
+    
+    # 4. Converter negrito markdown de duplo asterisco ** para asterisco único *
+    text = text.replace('**', '*')
+    
+    # 5. Converter tachado markdown duplo ~~ para tilde única ~
+    text = text.replace('~~', '~')
+    
+    return text
 
 # Configurações obtidas do ambiente ou defaults
 EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "http://localhost:8080")
@@ -21,7 +47,9 @@ def _headers():
     headers = {
         "Content-Type": "application/json",
     }
-    if EVOLUTION_API_KEY and EVOLUTION_API_KEY.startswith("ey"):
+    if "zdg.com.br" in EVOLUTION_API_URL or "vossi-ia.com.br" in EVOLUTION_API_URL:
+        headers["Authorization"] = f"Bearer {EVOLUTION_API_KEY}"
+    elif EVOLUTION_API_KEY and EVOLUTION_API_KEY.startswith("ey"):
         headers["Authorization"] = f"Bearer {EVOLUTION_API_KEY}"
     else:
         headers["apikey"] = EVOLUTION_API_KEY
@@ -73,8 +101,9 @@ def send_text(number, text, instance_name=None):
     """
     Envia uma mensagem de texto via WhatsApp.
     """
+    text = format_message_for_whatsapp(text)
     name = instance_name or EVOLUTION_INSTANCE_NAME
-    if "zdg.com.br" in EVOLUTION_API_URL:
+    if "zdg.com.br" in EVOLUTION_API_URL or "vossi-ia.com.br" in EVOLUTION_API_URL:
         # ZDG API External Wrapper Abstract URL
         url = EVOLUTION_API_URL
         payload = {
@@ -106,9 +135,10 @@ def send_image(number, image_path, caption="", instance_name=None):
     ZDG: multipart form-data (upload de arquivo direto).
     Evolution Local: base64 no JSON.
     """
+    caption = format_message_for_whatsapp(caption)
     name = instance_name or EVOLUTION_INSTANCE_NAME
 
-    if "zdg.com.br" in EVOLUTION_API_URL:
+    if "zdg.com.br" in EVOLUTION_API_URL or "vossi-ia.com.br" in EVOLUTION_API_URL:
         # ZDG usa multipart form-data com upload de arquivo
         url = EVOLUTION_API_URL
         

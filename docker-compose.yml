@@ -55,11 +55,32 @@ services:
     networks:
       - evolution-net
 
+  django-app:
+    build: .
+    container_name: django_app
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_DIR=/app/db_data
+    env_file:
+      - .env
+    volumes:
+      - django_data:/app/db_data
+      - django_media:/app/media
+    depends_on:
+      - postgres
+      - evolution-api
+    networks:
+      - evolution-net
+
 volumes:
   postgres_data:
   pgadmin_data:
   evolution_redis:
   evolution_instances:
+  django_data:
+  django_media:
 
 networks:
   evolution-net:

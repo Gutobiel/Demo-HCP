@@ -571,9 +571,9 @@ def recommend_tires(state: AgentState):
             condicao = p.get('condicao', '')
             
             if preco_orig and preco_orig != "N/A":
-                texto_preco = f"De: <s>{preco_orig}</s> | Por: **{preco_vista} à vista**" 
+                texto_preco = f"De: ~{preco_orig}~ | Por: *{preco_vista} à vista*" 
             else:
-                texto_preco = f"Por: **{preco_vista} à vista**"
+                texto_preco = f"Por: *{preco_vista} à vista*"
                 
             if condicao:
                 texto_preco += f" ou {condicao}"
