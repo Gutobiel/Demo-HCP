@@ -44,6 +44,14 @@ def chat_api(request):
                     text_response = msg["content"]
                 elif msg["type"] == "image":
                     images.append({"caption": msg.get("caption", "")})
+                    # Remove temporary screenshot for webchat to save disk space
+                    try:
+                        import os
+                        if "path" in msg and os.path.exists(msg["path"]):
+                            os.remove(msg["path"])
+                            logger.info(f"Screenshot temporário do webchat removido: {msg['path']}")
+                    except Exception as e_del:
+                        logger.error(f"Erro ao remover screenshot do webchat: {e_del}")
             
             return JsonResponse({"response": text_response, "images": images})
         except Exception as e:
@@ -112,6 +120,14 @@ def whatsapp_webhook(request):
                         evolution_api.send_text(phone_number, msg["content"])
                     elif msg["type"] == "image":
                         evolution_api.send_image(phone_number, msg["path"], msg.get("caption", ""))
+                        # Remove temporary screenshot to keep disk footprint clean
+                        try:
+                            import os
+                            if os.path.exists(msg["path"]):
+                                os.remove(msg["path"])
+                                logger.info(f"Screenshot temporário removido: {msg['path']}")
+                        except Exception as e_del:
+                            logger.error(f"Erro ao remover screenshot temporário: {e_del}")
                     
                     # Pequeno delay entre mensagens para manter ordem no WhatsApp
                     if len(response_messages) > 1:
