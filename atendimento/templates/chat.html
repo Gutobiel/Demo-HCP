@@ -238,9 +238,12 @@
 <body>
 
     <div class="chat-container">
-        <div class="chat-header">
-            <h1>Vendedor HC Pneus</h1>
-            <p>Agent Online</p>
+        <div class="chat-header" style="position: relative; display: flex; align-items: center; justify-content: space-between; padding: 20px;">
+            <div style="text-align: left;">
+                <h1 style="margin: 0; font-size: 1.2rem; font-weight: 600; letter-spacing: 0.5px;">Vendedor HC Pneus</h1>
+                <p style="margin: 5px 0 0; font-size: 0.85rem; color: var(--text-muted);">Agent Online</p>
+            </div>
+            <button id="btn-nova-conversa" onmouseover="this.style.background='rgba(255,255,255,0.18)'" onmouseout="this.style.background='rgba(255,255,255,0.08)'" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #fff; padding: 8px 14px; border-radius: 20px; font-size: 0.8rem; font-weight: 500; cursor: pointer; transition: all 0.3s; backdrop-filter: blur(5px);">Nova Conversa</button>
         </div>
 
         <div class="chat-messages" id="chat-messages">
@@ -266,6 +269,21 @@
         const input = document.getElementById('user-input');
         const messagesContainer = document.getElementById('chat-messages');
         const typingIndicator = document.getElementById('typing-indicator');
+        const btnNovaConversa = document.getElementById('btn-nova-conversa');
+
+        function generateUUID() {
+            return 'web-' + Math.random().toString(36).substring(2, 11) + '-' + Date.now();
+        }
+
+        let sessionId = localStorage.getItem('chat_session_id') || generateUUID();
+        localStorage.setItem('chat_session_id', sessionId);
+
+        btnNovaConversa.addEventListener('click', () => {
+            messagesContainer.innerHTML = '';
+            sessionId = generateUUID();
+            localStorage.setItem('chat_session_id', sessionId);
+            appendMessage("Mande uma mensagem para iniciar a demonstração!", 'agent');
+        });
 
         function appendMessage(text, sender, isHTML = false) {
             const msgDiv = document.createElement('div');
@@ -308,7 +326,7 @@
                         'Content-Type': 'application/json',
                         'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
                     },
-                    body: JSON.stringify({ message: text })
+                    body: JSON.stringify({ message: text, session_id: sessionId })
                 });
 
                 const data = await response.json();
