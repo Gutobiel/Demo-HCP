@@ -43,15 +43,18 @@ def chat_api(request):
                 if msg["type"] == "text":
                     text_response = msg["content"]
                 elif msg["type"] == "image":
-                    images.append({"caption": msg.get("caption", "")})
-                    # Remove temporary screenshot for webchat to save disk space
+                    img_data = {"caption": msg.get("caption", "")}
                     try:
                         import os
+                        import base64
                         if "path" in msg and os.path.exists(msg["path"]):
+                            with open(msg["path"], "rb") as f:
+                                img_data["base64"] = base64.b64encode(f.read()).decode('utf-8')
                             os.remove(msg["path"])
-                            logger.info(f"Screenshot temporário do webchat removido: {msg['path']}")
-                    except Exception as e_del:
-                        logger.error(f"Erro ao remover screenshot do webchat: {e_del}")
+                            logger.info(f"Screenshot temporário do webchat convertido para base64 e removido: {msg['path']}")
+                    except Exception as e_img:
+                        logger.error(f"Erro ao processar imagem para o webchat: {e_img}")
+                    images.append(img_data)
             
             return JsonResponse({"response": text_response, "images": images})
         except Exception as e:
