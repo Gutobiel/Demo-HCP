@@ -119,6 +119,24 @@ def screenshot_produto(link_produto, data_name=None):
         filename = f"produto_{uuid.uuid4().hex[:8]}.png"
         filepath = os.path.join(screenshot_dir, filename)
 
+        # Ocultar banners de cookies, LGPD ou popups que fiquem sobrepostos no elemento .head
+        try:
+            driver.execute_script("""
+                var selectors = [
+                    '.lgpd', '.cookie-consent', '[id*="lgpd"]', '[class*="lgpd"]',
+                    'section footer', '.seller-modal', 'div[class*="modal"]',
+                    '.cookies', '.cookies-consent', '.privacy-policy'
+                ];
+                selectors.forEach(function(sel) {
+                    document.querySelectorAll(sel).forEach(function(el) {
+                        el.style.setProperty('display', 'none', 'important');
+                    });
+                });
+            """)
+            time.sleep(0.5)
+        except Exception as e_hide:
+            print(f"[Screenshot] Erro ao ocultar overlays: {e_hide}")
+
         # Screenshot apenas do elemento .head
         head_element.screenshot(filepath)
         print(f"Screenshot do produto salvo em: {filepath}")

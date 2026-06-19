@@ -173,3 +173,19 @@ def evolution_api_config(request):
         "api_key": "***" + str(api_key)[-4:] if api_key else None
     }
     return JsonResponse(data)
+
+def test_image(request):
+    import requests
+    url = "https://d2szzdfzwulzt5.cloudfront.net/Custom/Content/Products/98/87/988725_pneu-165-70r14-85t-goodyear-assurance-maxlife_m1_637672057135279734.webp"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    }
+    res = {}
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        res["status_code"] = r.status_code
+        res["content_length"] = len(r.content)
+        res["headers"] = dict(r.headers)
+    except Exception as e:
+        res["error"] = str(e)
+    return JsonResponse(res)
