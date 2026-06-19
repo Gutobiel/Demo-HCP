@@ -27,4 +27,4 @@ COPY . /app/
 EXPOSE 8000
 
 # Run migrations and start Django using gunicorn
-CMD python manage.py migrate && gunicorn --bind 0.0.0.0:8000 hcpneus_demo.wsgi:application
+CMD python manage.py migrate && gunicorn --timeout 120 --bind 0.0.0.0:8000 hcpneus_demo.wsgi:application

@@ -29,6 +29,9 @@ def screenshot_produto(link_produto, data_name=None):
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--disable-software-rasterizer")
+        chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("--disable-setuid-sandbox")
     chrome_options.add_argument("--window-size=1280,900")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.page_load_strategy = 'eager'  # Não esperar TUDO carregar
@@ -38,7 +41,7 @@ def screenshot_produto(link_produto, data_name=None):
     driver = None
     try:
         driver = webdriver.Chrome(options=chrome_options)
-        driver.set_page_load_timeout(60)  # Timeout maior para sites pesados
+        driver.set_page_load_timeout(30)  # Timeout maior para sites pesados
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         driver.get(link_produto)
 
