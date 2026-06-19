@@ -189,3 +189,19 @@ def test_image(request):
     except Exception as e:
         res["error"] = str(e)
     return JsonResponse(res)
+
+from django.http import HttpResponse
+
+def view_chrome_logs(request):
+    """Exibe o arquivo de logs do Chrome diretamente no navegador."""
+    import os
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    log_filepath = os.path.join(base_dir, "chrome_console.log")
+    if os.path.exists(log_filepath):
+        try:
+            with open(log_filepath, "r", encoding="utf-8") as f:
+                content = f.read()
+            return HttpResponse(content, content_type="text/plain; charset=utf-8")
+        except Exception as e:
+            return HttpResponse(f"Erro ao ler arquivo de logs: {e}", content_type="text/plain; charset=utf-8")
+    return HttpResponse("Arquivo 'chrome_console.log' nao encontrado ou esta vazio.", content_type="text/plain; charset=utf-8")
